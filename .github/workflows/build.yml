@@ -16,41 +16,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: early-access-build-${{ github.ref }}
-  queue: max
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  notifyTelegram:
-    name: Notify Telegram
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      - name: Set up Python 3
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.x'
-
-      - name: Install Dependencies
-        run: |
-          pip install requests
-
-      - name: Send a message to Telegram
-        env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
-        run: |
-          python ./.github/workflows/notify_telegram.py
-        continue-on-error: true
-
   build:
-    name: Build Release APKs (${{ matrix.distribution }}-${{ matrix.device }}-${{ matrix.abi }})
+    name: Build Release APK (gms-mobile-arm64)
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
-    needs: notifyTelegram
 
     strategy:
       matrix:
@@ -60,63 +33,36 @@ jobs:
             distributionName: Gms
             deviceName: Mobile
             abi: arm64
-          - device: mobile
-            distribution: gms
-            distributionName: Gms
-            deviceName: Mobile
-            abi: armeabi
-          - device: mobile
-            distribution: gms
-            distributionName: Gms
-            deviceName: Mobile
-            abi: x86
-          - device: mobile
-            distribution: gms
-            distributionName: Gms
-            deviceName: Mobile
-            abi: x86_64
-          - device: mobile
-            distribution: gms
-            distributionName: Gms
-            deviceName: Mobile
-            abi: universal
-          - device: tv
-            distribution: gms
-            distributionName: Gms
-            deviceName: Tv
-            abi: universal
-          - device: mobile
-            distribution: foss
-            distributionName: Foss
-            deviceName: Mobile
-            abi: universal
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
 
-      - name: Set up Python 3.15
-        uses: actions/setup-python@v7
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.15'
+          python-version: '3.x'
 
       - name: Generate translation contributor credits
-        run: python scripts/generate_translation_contributors.py
+        run: |
+          if [ -f "scripts/generate_translation_contributors.py" ]; then
+            python scripts/generate_translation_contributors.py
+          fi
 
-      - name: Set up JDK 27
-        uses: actions/setup-java@v6
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
         with:
-          java-version: '27'
+          java-version: '21'
           distribution: 'temurin'
-      
+
       - name: Set Up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v3
         with:
           cache-cleanup: on-success
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
-          
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
@@ -156,13 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           GRADLE_TASK="${{ steps.variant.outputs.gradle_task }}"
-          ABI="${{ matrix.abi }}"
-
-          if [ "$ABI" = "armeabi" ] || [ "$ABI" = "x86" ]; then
-            ./gradlew "$GRADLE_TASK" 2>&1 | python3 -c "import re,sys;p=re.compile(r'^(WARNING: )?\[CXX5202\] This app only has 32-bit \[(armeabi-v7a|x86)\] native libraries\. Beginning August 1, 2019 Google Play store requires that all apps that include native libraries must provide 64-bit versions\. For more information, visit https://g\.co/64-bit-requirement\$');[sys.stdout.write(l) for l in sys.stdin if not p.match(l.rstrip())]"
-          else
-            ./gradlew "$GRADLE_TASK"
-          fi
+          ./gradlew "$GRADLE_TASK"
         env:
           PULL_REQUEST: 'false'
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -253,7 +193,7 @@ jobs:
             --ks-key-alias androiddebugkey \
             --out "${APK_FILE%.apk}-signed.apk" \
             "$APK_FILE"
-      
+
       - name: Move signed APK
         shell: bash
         run: |
@@ -269,62 +209,10 @@ jobs:
             exit 1
           fi
           mv "${SIGNED_APKS[0]}" "$RELEASE_DIR/out/${{ steps.variant.outputs.apk_name }}"
-      - name: Upload APK to GitHub Artifacts
-        uses: actions/upload-artifact@main
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.variant.outputs.apk_name }}
+          name: app-gms-mobile-arm64-release
           path: ${{ steps.release_dir.outputs.release_dir }}/out/${{ steps.variant.outputs.apk_name }}
           retention-days: 14
-  
-      - name: Publish Signed Release APK to Private R2
-        shell: bash
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          APK_PATH: ${{ steps.release_dir.outputs.release_dir }}/out/${{ steps.variant.outputs.apk_name }}
-          APK_NAME: ${{ steps.variant.outputs.apk_name }}
-        run: bash .github/scripts/publish-early-access.sh
-
-  finalizeEarlyAccess:
-    name: Finalize Build and Enforce R2 Retention
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v7
-      - name: Retain Five Successful Commits per Branch
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-        run: python3 .github/scripts/finalize-early-access.py
-
-  notifyDiscord:
-    name: Announce complete Early Access build
-    if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
-    runs-on: ubuntu-latest
-    needs: finalizeEarlyAccess
-    steps:
-      - uses: actions/checkout@v7
-      - name: Notify authorized Discord channel
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID: ${{ vars.DISCORD_CHANNEL_ID }}
-          EARLY_ACCESS_SITE_ORIGIN: ${{ vars.EARLY_ACCESS_SITE_ORIGIN }}
-        run: bash .github/scripts/notify-early-access.sh
-
-  notifyUser:
-    name: Notify referenced issues
-    if: github.ref == 'refs/heads/dev' && github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
-    needs:
-      - build
-    uses: ./.github/workflows/notify_user.yml
-    permissions:
-      issues: write
-      pull-requests: write
-      contents: read
-    secrets: inherit
