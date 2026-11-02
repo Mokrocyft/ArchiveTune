@@ -232,15 +232,27 @@ jobs:
           find app/build/outputs/apk -maxdepth 8 -type d -print || true
           exit 1
 
-      - name: Sign APK
-        uses: ilharp/sign-android-release@v2.0.0
-        with:
-          releaseDir: ${{ steps.release_dir.outputs.release_dir }}/
-          signingKey: ${{ secrets.KEYSTORE }}
-          keyAlias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-          buildToolsVersion: 35.0.0
+      - name: Sign APK with Debug Keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="${{ steps.release_dir.outputs.release_dir }}"
+          
+          keytool -genkey -v -keystore test.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+          
+          APK_FILE=$(find "$RELEASE_DIR" -maxdepth 1 -type f -name "*.apk" | head -n 1)
+          
+          $ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner sign \
+            --ks test.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --out "${APK_FILE%.apk}-signed.apk" \
+            "$APK_FILE"
       
       - name: Move signed APK
         shell: bash
