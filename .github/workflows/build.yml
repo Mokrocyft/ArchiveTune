@@ -257,6 +257,12 @@ jobs:
             exit 1
           fi
           mv "${SIGNED_APKS[0]}" "$RELEASE_DIR/out/${{ steps.variant.outputs.apk_name }}"
+      - name: Upload APK to GitHub Artifacts
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ steps.variant.outputs.apk_name }}
+          path: ${{ steps.release_dir.outputs.release_dir }}/out/${{ steps.variant.outputs.apk_name }}
+          retention-days: 14
   
       - name: Publish Signed Release APK to Private R2
         shell: bash
