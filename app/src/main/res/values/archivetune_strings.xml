@@ -14,8 +14,6 @@
     <string name="music_recognition_processing">Processing…</string>
     <string name="music_recognition_listen_again">Listen again</string>
     <string name="music_recognition_no_match">No match found</string>
-    <string name="music_recognition_signature_failed">Couldn’t generate a signature</string>
-    <string name="music_recognition_recognition_failed">Recognition failed</string>
     <string name="music_recognition_open_shazam">Open Shazam</string>
     <string name="music_recognition_lyrics_preview">Lyrics preview</string>
     <string name="music_recognition_permission_title">Microphone permission</string>
@@ -23,16 +21,12 @@
     <string name="music_recognition_permission_action">Allow</string>
     <string name="music_recognition_error">Something went wrong</string>
     <string name="music_recognition_settings">Music recognition settings</string>
-    <string name="music_recognition_background_title">Recognition in background</string>
-    <string name="music_recognition_background_description">When enabled, the Quick Settings tile recognizes audio playing on this device without opening ArchiveTune.</string>
-    <string name="music_recognition_background_foss_description">Background recognition is unavailable in the FOSS variant. The Quick Settings tile opens the recognition screen instead.</string>
     <string name="music_recognition_notification_channel_name">Music recognition</string>
     <string name="music_recognition_notification_channel_description">Music recognition progress and results</string>
     <string name="music_recognition_notification_status_listening">LISTENING</string>
     <string name="music_recognition_notification_status_processing">PROCESSING</string>
     <string name="music_recognition_notification_status_result">RESULT</string>
     <string name="music_recognition_notification_listening_title">Listening for music</string>
-    <string name="music_recognition_notification_listening_text">Capturing audio playing on this device</string>
     <string name="music_recognition_notification_processing_title">Processing audio</string>
     <string name="music_recognition_notification_processing_text">Matching the captured audio fingerprint</string>
     <string name="music_recognition_notification_artist">Artist: %1$s</string>
@@ -41,10 +35,7 @@
     <string name="music_recognition_notification_release">Released: %1$s</string>
     <string name="music_recognition_notification_label">Label: %1$s</string>
     <string name="music_recognition_notification_isrc">ISRC: %1$s</string>
-    <string name="music_recognition_notification_no_match_title">No song found</string>
     <string name="music_recognition_notification_no_match_text">Keep the music playing clearly, then try recognition again.</string>
-    <string name="music_recognition_notification_recording_failed_title">Couldn’t capture device audio</string>
-    <string name="music_recognition_notification_recording_failed_text">The playing app may block audio capture, or playback may have stopped.</string>
     <string name="music_recognition_notification_signature_failed_text">The captured audio did not contain enough music to identify.</string>
     <string name="music_recognition_notification_recognition_failed_text">The recognition service could not identify this audio. Try again shortly.</string>
     <string name="music_recognition_history">Recognition history</string>
@@ -54,6 +45,26 @@
     <string name="music_recognition_history_no_results_title">No history matches</string>
     <string name="music_recognition_history_no_results_body">Try another song, artist, album, or code.</string>
     <string name="music_recognition_history_recognized_at">Recognized %1$s</string>
+    <string name="music_recognition_idle_hint">Tap the button to identify a song playing around you.</string>
+    <string name="music_recognition_searching">Searching for a match…</string>
+    <string name="music_recognition_match_found">Match found</string>
+    <string name="music_recognition_step_listen">Listen</string>
+    <string name="music_recognition_step_process">Process</string>
+    <string name="music_recognition_step_result">Result</string>
+    <string name="music_recognition_step_state_current">Current step</string>
+    <string name="music_recognition_step_state_done">Done</string>
+    <string name="music_recognition_capture_progress">%1$d%% of the sample captured</string>
+    <string name="music_recognition_floating_title">Floating recognition button</string>
+    <string name="music_recognition_floating_description">Shows a floating button over other apps. Tap it to identify a song playing nearby or on this phone’s speaker. Drag it to the bottom to close it; the Quick Settings tile brings it back.</string>
+    <string name="music_recognition_floating_foss_description">The floating recognition button is unavailable in the FOSS variant. The Quick Settings tile opens the recognition screen instead.</string>
+    <string name="music_recognition_floating_permissions_denied">The floating button needs microphone access and permission to display over other apps.</string>
+    <string name="music_recognition_floating_dismiss">Drop here to close</string>
+    <string name="music_recognition_floating_try_again">Tap to try again</string>
+    <string name="music_recognition_floating_mic_unavailable">Microphone unavailable</string>
+    <string name="music_recognition_floating_open_details">Open song details</string>
+    <string name="music_recognition_notification_floating_title">Floating recognition is on</string>
+    <string name="music_recognition_notification_floating_text">Tap the floating button to identify a song.</string>
+    <string name="music_recognition_notification_listening_mic_text">Listening through the microphone</string>
     <string name="local_history">Local</string>
     <string name="history_local_summary">Played on this device</string>
     <string name="history_remote_summary">Synced from YouTube Music</string>
@@ -547,7 +558,6 @@
     <string name="settings_stats_title">Listening Stats</string>
     <string name="settings_stats_subtitle">Your top songs, artists, and playback history</string>
     <string name="top_songs">Top Songs</string>
-    <string name="top_albums">Top Albums</string>
     <string name="year_in_music">Year in Music</string>
     <string name="top_artists">Top Artists</string>
     <string name="share_summary">Share Summary</string>
@@ -740,6 +750,13 @@
     <string name="about_content_desc_discord">Discord</string>
     <string name="about_content_desc_telegram">Telegram</string>
     <string name="about_content_desc_donate">Donate</string>
+    <string name="about_section_links">Links</string>
+    <string name="about_section_project">Project</string>
+    <string name="about_translations">Translations</string>
+    <string name="about_translations_summary">Credits for every language</string>
+    <string name="about_open_source_licenses">Open-source licenses</string>
+    <string name="about_open_source_licenses_summary">Libraries that power the app</string>
+    <string name="about_contributors_see_all">See all contributors</string>
     <string name="aod_mode">AOD Mode</string>
     <string name="playlist_source_local">Local</string>
     <string name="playlist_source_online">Online</string>
@@ -823,4 +840,11 @@
     <string name="whats_new_acknowledgment_failed">Couldn\'t save that you\'ve seen this version. Choose %1$s to try again.</string>
     <string name="whats_new_startup_failed">Couldn\'t check what\'s new for this version.</string>
     <string name="whats_new_open_failed">Couldn\'t open the release notes.</string>
+    <string name="less">less</string>
+    <string name="media_detail_summary">%1$s, %2$s</string>
+    <string name="media_detail_duration_hours">%1$d hr %2$d min</string>
+    <plurals name="n_minute">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
 </resources>
