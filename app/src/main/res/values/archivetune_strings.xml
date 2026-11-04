@@ -77,6 +77,12 @@
     <string name="history_remote_error_desc">Try again in a moment.</string>
     <string name="history_no_results_title">No matching songs</string>
     <string name="history_no_results_desc">Try a different song or artist name.</string>
+    <string name="history_last_played">Last played</string>
+    <string name="history_now_playing">Now playing</string>
+    <string name="history_pause">Pause</string>
+    <string name="history_played_at">%1$s · %2$s</string>
+    <string name="history_play_chapter">Play %1$s</string>
+    <string name="history_clear_search">Clear search</string>
     <string name="clear_selection">Clear selection</string>
     <string name="scan_device">Scan device</string>
     <string name="scanning_device">Scanning device…</string>
@@ -298,7 +304,11 @@
     <string name="lyrics_share_background_blur">Background blur</string>
     <string name="lyrics_share_background_blur_value">%1$d px</string>
     <string name="lyrics_line_blur">Blur lyrics lines</string>
-    <string name="show_lyrics_player_controls">Show player controls</string>
+    <string name="lyrics_auto_hide_controls">Auto-hide controls</string>
+    <string name="lyrics_auto_hide_controls_desc">Hide playback controls after 5 seconds. Tap the screen to show them again.</string>
+    <string name="lyrics_searching_lyrics_providers">Searching lyrics providers…</string>
+    <string name="lyrics_source_label">Source: %1$s</string>
+    <string name="lyrics_source_embedded">Embedded in file</string>
     <string name="lyrics_share_background_dim">Background dim</string>
     <string name="lyrics_share_background_dim_value">%1$d%%</string>
     <string name="lyrics_share_show_cover">Show album cover</string>
@@ -557,6 +567,8 @@
     <string name="settings_account_subtitle">Sign in and manage account sync</string>
     <string name="settings_stats_title">Listening Stats</string>
     <string name="settings_stats_subtitle">Your top songs, artists, and playback history</string>
+    <string name="settings_section_essentials">Essentials</string>
+    <string name="settings_profile_manage">Manage account</string>
     <string name="top_songs">Top Songs</string>
     <string name="year_in_music">Year in Music</string>
     <string name="top_artists">Top Artists</string>
@@ -847,4 +859,17 @@
         <item quantity="one">%d minute</item>
         <item quantity="other">%d minutes</item>
     </plurals>
+    <string name="menu_type_song">Song</string>
+    <string name="menu_type_album">Album</string>
+    <string name="menu_type_artist">Artist</string>
+    <string name="menu_type_playlist">Playlist</string>
+    <string name="menu_section_library">Library</string>
+    <string name="menu_section_offline">Offline</string>
+    <string name="menu_section_go_to">Go to</string>
+    <string name="menu_section_manage">Manage</string>
+    <string name="menu_section_sound">Sound</string>
+    <string name="menu_favorite">Favorite</string>
+    <string name="menu_state_on">On</string>
+    <string name="menu_download_available_offline">Available offline</string>
+    <string name="menu_download_tap_to_cancel">Tap to cancel</string>
 </resources>

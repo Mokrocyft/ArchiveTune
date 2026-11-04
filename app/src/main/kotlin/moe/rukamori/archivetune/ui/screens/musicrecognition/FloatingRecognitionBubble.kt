@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -192,7 +193,7 @@ private fun FloatingRecognitionCore(
                 modifier = Modifier.size(FloatingBubbleCoreSize + 20.dp),
                 color = colors.primary,
                 trackColor = colors.surfaceContainerHighest,
-                amplitude = { if (animationsEnabled) 0.2f + level.value * 0.8f else 0f },
+                amplitude = if (animationsEnabled) WavyProgressIndicatorDefaults.indicatorAmplitude else NoWaveAmplitude,
             )
             FloatingRecognitionUiState.Processing -> if (animationsEnabled) {
                 CircularWavyProgressIndicator(
@@ -220,12 +221,29 @@ private fun FloatingRecognitionCore(
                         val scale = 1f + level.value * FloatingPulseScaleRange
                         scaleX = scale
                         scaleY = scale
-                        shadowElevation = 6.dp.toPx()
-                        shape = EditorialMorphShape(morphState.morph, morphState.progress.value)
-                        clip = true
-                    }
-                    .drawBehind { drawRect(containerColor.value) },
-            )
+                    },
+            ) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .padding(FloatingShadowInset)
+                        .graphicsLayer {
+                            shadowElevation = 6.dp.toPx()
+                            shape = CircleShape
+                            clip = true
+                        }
+                        .drawBehind { drawRect(containerColor.value) },
+                )
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            shape = EditorialMorphShape(morphState.morph, morphState.progress.value)
+                            clip = true
+                        }
+                        .drawBehind { drawRect(containerColor.value) },
+                )
+            }
             FloatingRecognitionCoreContent(state, contentColor, animationsEnabled)
         }
     }
@@ -429,4 +447,6 @@ internal fun FloatingRecognitionDismissTarget(hovered: Boolean) {
 }
 
 private val FloatingCardTextMaxWidth = 196.dp
+private val FloatingShadowInset = 4.dp
+private val NoWaveAmplitude: (Float) -> Float = { 0f }
 private const val FloatingPulseScaleRange = 0.14f
