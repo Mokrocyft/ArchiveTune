@@ -42,6 +42,8 @@ import android.os.Handler
 import android.os.PowerManager
 import android.util.LruCache
 import android.widget.Toast
+import androidx.annotation.DrawableRes
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
@@ -60,6 +62,7 @@ import androidx.media3.common.Player.REPEAT_MODE_OFF
 import androidx.media3.common.Player.REPEAT_MODE_ONE
 import androidx.media3.common.Player.STATE_IDLE
 import androidx.media3.common.Timeline
+import androidx.media3.common.Tracks
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
@@ -79,6 +82,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.offline.Download
+import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.exoplayer.analytics.PlaybackStats
 import androidx.media3.exoplayer.analytics.PlaybackStatsListener
 import androidx.media3.exoplayer.audio.AudioSink
@@ -91,6 +96,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -112,6 +118,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -170,9 +177,15 @@ import moe.rukamori.archivetune.constants.LastFMUseNowPlaying
 import moe.rukamori.archivetune.constants.ListenBrainzEnabledKey
 import moe.rukamori.archivetune.constants.ListenBrainzTokenKey
 import moe.rukamori.archivetune.constants.MaxSongCacheSizeKey
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandClosePlayback
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandSeekBackIncrement
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandSeekForwardIncrement
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleDownload
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleLibrary
 import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleLike
 import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleRepeatMode
 import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleShuffle
+import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleSleepTimer
 import moe.rukamori.archivetune.constants.MediaSessionConstants.CommandToggleStartRadio
 import moe.rukamori.archivetune.constants.PauseListenHistoryKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
@@ -185,6 +198,8 @@ import moe.rukamori.archivetune.constants.ScrobbleDelaySecondsKey
 import moe.rukamori.archivetune.constants.ScrobbleMinSongDurationKey
 import moe.rukamori.archivetune.constants.ShowLyricsKey
 import moe.rukamori.archivetune.constants.SkipSilenceKey
+import moe.rukamori.archivetune.constants.SleepTimerFadeOutKey
+import moe.rukamori.archivetune.constants.SleepTimerFinishSongKey
 import moe.rukamori.archivetune.constants.SmartTrimmerKey
 import moe.rukamori.archivetune.constants.StopMusicOnTaskClearKey
 import moe.rukamori.archivetune.constants.TogetherClientIdKey
@@ -240,6 +255,10 @@ import moe.rukamori.archivetune.models.toMediaMetadata
 import moe.rukamori.archivetune.morideobfuscator.youtubei.YoutubeiException
 import moe.rukamori.archivetune.morideobfuscator.youtubei.YoutubeiFailureKind
 import moe.rukamori.archivetune.playback.bitperfect.BitPerfectAudioSink
+import moe.rukamori.archivetune.playback.notification.MediaNotificationAction
+import moe.rukamori.archivetune.playback.notification.MediaNotificationConfiguration
+import moe.rukamori.archivetune.playback.notification.MediaNotificationNavigation
+import moe.rukamori.archivetune.playback.notification.MediaNotificationSettingsRepository
 import moe.rukamori.archivetune.playback.bitperfect.BitPerfectEvent
 import moe.rukamori.archivetune.playback.bitperfect.BitPerfectOutput
 import moe.rukamori.archivetune.playback.bitperfect.BitPerfectRoutingSink
@@ -328,6 +347,14 @@ class MusicService :
 
     @Inject
     lateinit var androidAutoSettings: AndroidAutoSettingsUseCases
+
+    @Inject
+    lateinit var mediaNotificationSettings: MediaNotificationSettingsRepository
+
+    @Volatile
+    private var notificationConfiguration = MediaNotificationConfiguration()
+
+    private var currentDownloadState: Int? = null
 
     @Inject
     internal lateinit var loadWidgetInsightsUseCase: LoadWidgetInsightsUseCase
@@ -590,6 +617,7 @@ class MusicService :
     private var audioNormalizationEnabled = true
     var playerVolume = MutableStateFlow(1f)
     private val audioFocusVolumeFactor = MutableStateFlow(1f)
+    private val sleepTimerVolumeFactor = MutableStateFlow(1f)
     val recapAudioMuted = MutableStateFlow(false)
     val recapQueueActive = MutableStateFlow(false)
     private var recapAudioQueue: Queue? = null
@@ -598,7 +626,7 @@ class MusicService :
     private var crossfadeDurationMs = 0L
     private var crossfadeGapless = false
     private var crossfadeSuppressedMediaId: String? = null
-    private var crossfadeCoordinator: CrossfadeCoordinator? = null
+    private var crossfadeHandler: CrossfadeHandler? = null
 
     private data class CrossfadeConfig(
         val enabled: Boolean,
@@ -775,8 +803,9 @@ class MusicService :
     @DownloadCache
     lateinit var downloadCache: Cache
 
-    lateinit var localPlayer: ExoPlayer
-        private set
+    private lateinit var localPlaybackPlayer: SwappableLocalPlayer
+    val localPlayer: ExoPlayer
+        get() = localPlaybackPlayer.exoPlayer
     lateinit var player: Player
         private set
     private var pendingQueueRemoval: QueueRemoval? = null
@@ -1206,33 +1235,20 @@ class MusicService :
             driver = dataStore[UsbBitPerfectDriverKey].toEnum(UsbBitPerfectDriver.ANDROID),
             allowFixedVolume = dataStore.get(UsbBitPerfectFixedVolumeKey, false),
         )
-        localPlayer =
-            ExoPlayer
-                .Builder(this)
-                .setMediaSourceFactory(createMediaSourceFactory())
-                .setRenderersFactory(createRenderersFactory())
-                .setLoadControl(createPrimaryLoadControl())
-                .setTrackSelector(DefaultTrackSelector(this, SafeTrackSelectionFactory()))
-                .setHandleAudioBecomingNoisy(true)
-                .setWakeMode(C.WAKE_MODE_NETWORK)
-                .setAudioAttributes(
-                    playbackAudioAttributes(),
-                    false,
-                ).setSeekBackIncrementMs(5000)
-                .setSeekForwardIncrementMs(5000)
-                .setDeviceVolumeControlEnabled(true)
-                .build()
-                .apply {
+        localPlaybackPlayer =
+            SwappableLocalPlayer(
+                buildLocalExoPlayer().apply {
                     addAnalyticsListener(PlaybackStatsListener(false, this@MusicService))
-                    addListener(audioEffectPlayerListener)
-                    setOffloadEnabled(false)
-                }
+                },
+            ).apply {
+                addListener(audioEffectPlayerListener)
+            }
         castPlaybackRepository = CastPlaybackRepositoryLocator.get(this)
         player =
             castPlaybackRepository
                 .createPlayer(
                     context = this,
-                    localPlayer = localPlayer,
+                    localPlayer = localPlaybackPlayer,
                     mediaItemResolver =
                         object : CastMediaItemResolver {
                             override fun resolveForCast(mediaItem: MediaItem): MediaItem =
@@ -1254,15 +1270,18 @@ class MusicService :
                     sleepTimer = SleepTimer(scope, this, this@MusicService)
                     addListener(sleepTimer)
                 }
-        crossfadeCoordinator =
-            CrossfadeCoordinator(
+        crossfadeHandler =
+            CrossfadeHandler(
                 scope = { scope },
-                sessionPlayer = player,
-                createTailPlayer = ::createCrossfadeTailPlayer,
-                baseVolume = ::currentEffectivePlayerVolumeForMediaId,
-                maxVolume = maxSafeGainFactor,
-                isAllowed = { crossfadeEnabled && !sleepTimer.pauseWhenSongEnd },
-                onFinished = ::onCrossfadeFinished,
+                host = localPlaybackPlayer,
+                isLocalPlayback = ::isLocalPlaybackActive,
+                canStart = { crossfadeEnabled && !sleepTimer.pauseWhenSongEnd && !bitPerfectOutput.status.value.active },
+                createPlayer = ::createCrossfadePlayer,
+                activatePlayer = ::activateCrossfadePlayer,
+                releasePlayer = ::releaseCrossfadePlayer,
+                volumeFor = { mediaId -> currentEffectivePlayerVolumeForMediaId(mediaId).coerceIn(0f, maxSafeGainFactor) },
+                onFadeFinished = ::onCrossfadeFinished,
+                onAbandoned = ::onCrossfadeAbandoned,
             )
         sponsorBlockPlaybackController.attach(player, scope)
         playerInitialized.value = true
@@ -1319,6 +1338,10 @@ class MusicService :
             toggleLike = ::toggleLike
             toggleStartRadio = ::toggleStartRadio
             toggleLibrary = ::toggleLibrary
+            toggleDownload = ::toggleCurrentDownload
+            toggleSleepTimer = ::toggleSleepTimerFromNotification
+            closePlayback = ::closePlaybackFromNotification
+            seekByIncrement = ::seekByNotificationIncrement
             carMediaButtonPreferences = ::buildAndroidAutoButtons
             adoptQueueContinuation = ::adoptQueueContinuation
         }
@@ -1343,7 +1366,24 @@ class MusicService :
         setMediaNotificationProvider(mediaNotificationProvider)
         addSession(mediaSession)
 
+        notificationConfiguration = mediaNotificationSettings.currentConfiguration()
         updateNotification()
+        mediaNotificationSettings.configuration.collect(scope) { configuration ->
+            notificationConfiguration = configuration
+            updateNotification()
+        }
+        snapshotFlow { sleepTimer.isActive }
+            .distinctUntilChanged()
+            .collect(scope) { updateNotification() }
+        currentMediaMetadata
+            .flatMapLatest { mediaMetadata ->
+                if (mediaMetadata == null) flowOf(null) else moduleDownloadUtil.getDownload(mediaMetadata.id)
+            }.map { it?.state }
+            .distinctUntilChanged()
+            .collect(scope) { state ->
+                currentDownloadState = state
+                updateNotification()
+            }
         scope.launch {
             combine(
                 androidAutoSettings.configuration,
@@ -1396,7 +1436,13 @@ class MusicService :
             }
         }
 
-        combine(playerVolume, normalizeFactor, audioFocusVolumeFactor, recapAudioMuted) { playerVolume, normalizeFactor, audioFocusVolumeFactor, _ ->
+        combine(
+            playerVolume,
+            normalizeFactor,
+            audioFocusVolumeFactor,
+            recapAudioMuted,
+            sleepTimerVolumeFactor,
+        ) { playerVolume, normalizeFactor, audioFocusVolumeFactor, _, _ ->
             calculateEffectivePlayerVolume(playerVolume, normalizeFactor, audioFocusVolumeFactor)
         }.collectLatest(scope) { finalVolume ->
             updateEffectiveVolume(finalVolume)
@@ -1455,7 +1501,6 @@ class MusicService :
             .distinctUntilChanged()
             .collectLatest(scope) {
                 localPlayer.skipSilenceEnabled = it
-                crossfadeCoordinator?.setTailSkipSilenceEnabled(it)
             }
 
         dataStore.data
@@ -2516,12 +2561,12 @@ class MusicService :
     }
 
     private fun updateAudioBecomingNoisyHandling() {
-        if (!::localPlayer.isInitialized) return
+        if (!::localPlaybackPlayer.isInitialized) return
         localPlayer.setHandleAudioBecomingNoisy(!bitPerfectOutput.ownsUsbDisconnectHandling)
     }
 
     private fun reselectAudioSinkOutput() {
-        if (!::localPlayer.isInitialized || localPlayer.currentMediaItem == null) return
+        if (!::localPlaybackPlayer.isInitialized || localPlayer.currentMediaItem == null) return
         val state = localPlayer.playbackState
         if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) return
         localPlayer.seekTo(localPlayer.currentPosition.coerceAtLeast(0L))
@@ -2568,8 +2613,17 @@ class MusicService :
             normalizeFactor.takeIf { it.isFinite() }?.coerceIn(MIN_AUDIO_NORMALIZATION_FACTOR, MAX_AUDIO_NORMALIZATION_FACTOR) ?: 1f
         val safeAudioFocusVolumeFactor =
             audioFocusVolumeFactor.takeIf { it.isFinite() }?.coerceIn(MIN_AUDIO_FOCUS_VOLUME_FACTOR, 1f) ?: 1f
+        val safeSleepTimerVolumeFactor = sleepTimerVolumeFactor.value.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
         return if (recapAudioMuted.value) 0f else
-            (safePlayerVolume * safeNormalizeFactor * safeAudioFocusVolumeFactor).coerceIn(0f, maxSafeGainFactor)
+            (safePlayerVolume * safeNormalizeFactor * safeAudioFocusVolumeFactor * safeSleepTimerVolumeFactor)
+                .coerceIn(0f, maxSafeGainFactor)
+    }
+
+    fun setSleepTimerVolumeFactor(factor: Float) {
+        val safeFactor = factor.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
+        if (sleepTimerVolumeFactor.value == safeFactor) return
+        sleepTimerVolumeFactor.value = safeFactor
+        if (::player.isInitialized) applyEffectiveVolumeImmediately()
     }
 
     fun setRecapMuted(muted: Boolean) {
@@ -2643,7 +2697,7 @@ class MusicService :
     }
 
     private fun shouldRampEffectiveVolume(finalVolume: Float): Boolean {
-        if (crossfadeCoordinator?.controlsSessionVolume == true) return false
+        if (crossfadeHandler?.isFading == true) return false
         if (!shouldKeepPlaybackAudible()) return false
         if (!finalVolume.isFinite()) return false
         if (player.volume <= STUCK_MUTED_VOLUME_EPSILON) return false
@@ -2658,17 +2712,13 @@ class MusicService :
 
     private fun applyEffectiveVolume(finalVolume: Float = currentEffectivePlayerVolume()) {
         if (!::player.isInitialized) return
-        val coordinator = crossfadeCoordinator
-        if (coordinator?.controlsSessionVolume == true) {
-            coordinator.wake()
-            return
-        }
+        if (crossfadeHandler?.isFading == true) return
         player.volume = finalVolume
     }
 
     private fun ensureAudiblePlaybackVolume(reason: String) {
         if (!::player.isInitialized) return
-        if (crossfadeCoordinator?.controlsSessionVolume == true) return
+        if (crossfadeHandler?.isFading == true) return
         if (!shouldKeepPlaybackAudible()) return
         if (playerVolume.value <= 0f) return
 
@@ -2704,32 +2754,29 @@ class MusicService :
     }
 
     fun pauseFromSleepTimer() {
-        sleepTimer.clear()
-        cancelCrossfade(resetVolume = true)
+        cancelCrossfade(resetVolume = false)
         player.pause()
         player.playWhenReady = false
         localPlayer.pause()
         localPlayer.playWhenReady = false
+        sleepTimer.clear()
+        applyEffectiveVolumeImmediately()
+        updateNotification()
     }
 
     private fun scheduleCrossfade() {
         if (!::player.isInitialized) return
-        val coordinator = crossfadeCoordinator ?: return
-        if (coordinator.hasSwitchedSession) return
-        val request = resolveCrossfadeRequest()?.takeIf { player.playWhenReady || coordinator.isTransitioning }
-        if (request != null) {
-            coordinator.schedule(request)
-            return
-        }
-        val controlledVolume = coordinator.isTransitioning
-        coordinator.cancel()
-        if (controlledVolume) applyEffectiveVolumeImmediately()
+        crossfadeHandler?.schedule(resolveCrossfadePlan())
     }
 
-    private fun resolveCrossfadeRequest(): CrossfadeRequest? {
+    private fun isLocalPlaybackActive(): Boolean =
+        ::player.isInitialized && player.deviceInfo.playbackType == androidx.media3.common.DeviceInfo.PLAYBACK_TYPE_LOCAL
+
+    private fun resolveCrossfadePlan(): CrossfadePlan? {
         if (!crossfadeEnabled || crossfadeDurationMs <= 0L) return null
         if (sleepTimer.pauseWhenSongEnd) return null
-        if (player.deviceInfo.playbackType != androidx.media3.common.DeviceInfo.PLAYBACK_TYPE_LOCAL) return null
+        if (bitPerfectOutput.status.value.active) return null
+        if (!isLocalPlaybackActive()) return null
         if (player.mediaItemCount == 0 || player.currentTimeline.isEmpty) return null
         if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) return null
 
@@ -2747,14 +2794,15 @@ class MusicService :
         if (currentItem.metadata?.isPodcast == true || targetItem.metadata?.isPodcast == true) return null
         if (!repeatCurrent && crossfadeGapless && isGaplessAlbumTransition(currentItem, targetItem)) return null
 
-        val durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: return null
-        val timeline = crossfadeTimeline(durationMs, crossfadeDurationMs) ?: return null
-        return CrossfadeRequest(
-            plan = CrossfadePlan(currentItem.mediaId, targetItem.mediaId, timeline),
+        val durationMs = localPlayer.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: return null
+        val triggerPositionMs = CrossfadePlan.triggerPositionMs(durationMs, crossfadeDurationMs) ?: return null
+        return CrossfadePlan(
+            outgoingMediaId = currentItem.mediaId,
             outgoingIndex = currentIndex,
+            incomingMediaId = targetItem.mediaId,
             incomingIndex = targetIndex,
-            outgoingItem = currentItem,
-            outgoingDurationMs = durationMs,
+            triggerPositionMs = triggerPositionMs,
+            fadeDurationMs = crossfadeDurationMs,
         )
     }
 
@@ -2789,47 +2837,75 @@ class MusicService :
         return currentAlbum != null && currentAlbum == targetAlbum
     }
 
-    private fun createCrossfadeTailPlayer(): ExoPlayer =
+    private fun buildLocalExoPlayer(): ExoPlayer =
         ExoPlayer
             .Builder(this)
             .setMediaSourceFactory(createMediaSourceFactory())
             .setRenderersFactory(createRenderersFactory())
-            .setLoadControl(createCrossfadeLoadControl())
+            .setLoadControl(createPrimaryLoadControl())
             .setTrackSelector(DefaultTrackSelector(this, SafeTrackSelectionFactory()))
-            .setHandleAudioBecomingNoisy(false)
+            .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
-            .setAudioAttributes(playbackAudioAttributes(), false)
+            .setAudioAttributes(
+                playbackAudioAttributes(),
+                false,
+            ).setSeekBackIncrementMs(5000)
+            .setSeekForwardIncrementMs(5000)
+            .setDeviceVolumeControlEnabled(true)
             .build()
             .apply {
                 setOffloadEnabled(false)
-                val sessionAudioSessionId = localPlayer.audioSessionId
-                if (sessionAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                    setAudioSessionId(sessionAudioSessionId)
-                }
-                skipSilenceEnabled = localPlayer.skipSilenceEnabled
             }
 
-    private fun onCrossfadeFinished(
-        outcome: CrossfadeOutcome,
-        plan: CrossfadePlan,
-    ) {
-        if (outcome is CrossfadeOutcome.Abandoned) {
-            Timber.tag(TAG).d(
-                "Crossfade abandoned: reason=%s sessionSwitched=%s",
-                outcome.reason,
-                outcome.sessionSwitched,
-            )
-            if (!outcome.sessionSwitched && outcome.reason in CROSSFADE_RETRY_POINTLESS_REASONS) {
-                crossfadeSuppressedMediaId = plan.outgoingMediaId
+    private fun createCrossfadePlayer(): ExoPlayer {
+        val source = localPlayer
+        return buildLocalExoPlayer().apply {
+            val sessionAudioSessionId = source.audioSessionId
+            if (sessionAudioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                setAudioSessionId(sessionAudioSessionId)
             }
+            syncCrossfadePlayerConfiguration(this, source)
         }
+    }
+
+    private fun syncCrossfadePlayerConfiguration(
+        target: ExoPlayer,
+        source: ExoPlayer,
+    ) {
+        target.skipSilenceEnabled = source.skipSilenceEnabled
+        target.trackSelectionParameters = source.trackSelectionParameters
+        target.setOffloadEnabled(false)
+        target.setHandleAudioBecomingNoisy(!bitPerfectOutput.ownsUsbDisconnectHandling)
+    }
+
+    private fun activateCrossfadePlayer(
+        target: ExoPlayer,
+        source: ExoPlayer,
+    ) {
+        syncCrossfadePlayerConfiguration(target, source)
+        target.addAnalyticsListener(PlaybackStatsListener(false, this))
+    }
+
+    private fun releaseCrossfadePlayer(retired: ExoPlayer) {
+        runCatching { retired.stop() }
+        runCatching { retired.release() }
+            .onFailure { Timber.tag(TAG).w(it, "Unable to release crossfade player") }
+    }
+
+    private fun onCrossfadeFinished() {
         applyEffectiveVolumeImmediately()
         updateAudiblePlaybackRecovery()
         scheduleCrossfade()
     }
 
+    private fun onCrossfadeAbandoned(plan: CrossfadePlan) {
+        Timber.tag(TAG).d("Crossfade abandoned for %s", plan.outgoingMediaId)
+        crossfadeSuppressedMediaId = plan.outgoingMediaId
+        applyEffectiveVolumeImmediately()
+    }
+
     private fun cancelCrossfade(resetVolume: Boolean) {
-        crossfadeCoordinator?.cancel()
+        crossfadeHandler?.cancel()
         if (resetVolume && ::player.isInitialized) {
             applyEffectiveVolumeImmediately()
         }
@@ -3438,61 +3514,272 @@ class MusicService :
 
     private fun updateNotification() {
         try {
-            val customLayout =
-                listOf(
-                    CommandButton
-                        .Builder()
-                        .setDisplayName(
-                            getString(
-                                if (currentSong.value?.song?.liked == true) {
-                                    R.string.action_remove_like
-                                } else {
-                                    R.string.action_like
-                                },
-                            ),
-                        ).setIconResId(if (currentSong.value?.song?.liked == true) R.drawable.favorite else R.drawable.favorite_border)
-                        .setSessionCommand(CommandToggleLike)
-                        .setEnabled(currentSong.value != null)
-                        .build(),
-                    CommandButton
-                        .Builder()
-                        .setDisplayName(
-                            getString(
-                                when (player.repeatMode) {
-                                    REPEAT_MODE_OFF -> R.string.repeat_mode_off
-                                    REPEAT_MODE_ONE -> R.string.repeat_mode_one
-                                    REPEAT_MODE_ALL -> R.string.repeat_mode_all
-                                    else -> R.string.repeat_mode_off
-                                },
-                            ),
-                        ).setIconResId(
-                            when (player.repeatMode) {
-                                REPEAT_MODE_OFF -> R.drawable.repeat
-                                REPEAT_MODE_ONE -> R.drawable.repeat_one_on
-                                REPEAT_MODE_ALL -> R.drawable.repeat_on
-                                else -> R.drawable.repeat
-                            },
-                        ).setSessionCommand(CommandToggleRepeatMode)
-                        .build(),
-                    CommandButton
-                        .Builder()
-                        .setDisplayName(
-                            getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on),
-                        ).setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
-                        .setSessionCommand(CommandToggleShuffle)
-                        .build(),
-                    CommandButton
-                        .Builder()
-                        .setDisplayName(getString(R.string.start_radio))
-                        .setIconResId(R.drawable.radio)
-                        .setSessionCommand(CommandToggleStartRadio)
-                        .setEnabled(currentSong.value != null && currentMediaMetadata.value?.isPodcast != true)
-                        .build(),
-                )
-            mediaSession.setCustomLayout(customLayout)
+            mediaSession.setMediaButtonPreferences(buildNotificationButtons(notificationConfiguration))
             updateAndroidAutoButtons()
         } catch (e: Exception) {
             reportException(e)
+        }
+    }
+
+    private fun buildNotificationButtons(configuration: MediaNotificationConfiguration): List<CommandButton> {
+        val navigationButtons =
+            if (configuration.navigation == MediaNotificationNavigation.SEEK) {
+                listOf(
+                    seekNotificationButton(forward = false, seconds = configuration.seekIncrementSeconds),
+                    seekNotificationButton(forward = true, seconds = configuration.seekIncrementSeconds),
+                )
+            } else {
+                emptyList()
+            }
+        return navigationButtons + configuration.actions.map { action -> notificationActionButton(action, configuration) }
+    }
+
+    private fun seekNotificationButton(
+        forward: Boolean,
+        seconds: Int,
+    ): CommandButton =
+        CommandButton
+            .Builder(
+                if (forward) {
+                    when (seconds) {
+                        5 -> CommandButton.ICON_SKIP_FORWARD_5
+                        10 -> CommandButton.ICON_SKIP_FORWARD_10
+                        15 -> CommandButton.ICON_SKIP_FORWARD_15
+                        30 -> CommandButton.ICON_SKIP_FORWARD_30
+                        else -> CommandButton.ICON_SKIP_FORWARD
+                    }
+                } else {
+                    when (seconds) {
+                        5 -> CommandButton.ICON_SKIP_BACK_5
+                        10 -> CommandButton.ICON_SKIP_BACK_10
+                        15 -> CommandButton.ICON_SKIP_BACK_15
+                        30 -> CommandButton.ICON_SKIP_BACK_30
+                        else -> CommandButton.ICON_SKIP_BACK
+                    }
+                },
+            ).setDisplayName(
+                resources.getQuantityString(
+                    if (forward) R.plurals.media_notification_seek_forward else R.plurals.media_notification_seek_back,
+                    seconds,
+                    seconds,
+                ),
+            ).setCustomIconResId(if (forward) R.drawable.seek_forward else R.drawable.replay)
+            .setSessionCommand(if (forward) CommandSeekForwardIncrement else CommandSeekBackIncrement)
+            .setSlots(if (forward) CommandButton.SLOT_FORWARD else CommandButton.SLOT_BACK)
+            .setEnabled(player.currentMediaItem != null)
+            .build()
+
+    private fun notificationActionButton(
+        action: MediaNotificationAction,
+        configuration: MediaNotificationConfiguration,
+    ): CommandButton {
+        val song = currentSong.value
+        val mediaMetadata = currentMediaMetadata.value
+        return when (action) {
+            MediaNotificationAction.LIKE -> {
+                val liked = song?.song?.liked == true
+                customNotificationButton(
+                    displayName = getString(if (liked) R.string.action_remove_like else R.string.action_like),
+                    iconResId = if (liked) R.drawable.favorite else R.drawable.favorite_border,
+                    command = CommandToggleLike,
+                    enabled = song != null,
+                )
+            }
+
+            MediaNotificationAction.REPEAT ->
+                customNotificationButton(
+                    displayName =
+                        getString(
+                            when (player.repeatMode) {
+                                REPEAT_MODE_ONE -> R.string.repeat_mode_one
+                                REPEAT_MODE_ALL -> R.string.repeat_mode_all
+                                else -> R.string.repeat_mode_off
+                            },
+                        ),
+                    iconResId =
+                        when (player.repeatMode) {
+                            REPEAT_MODE_ONE -> R.drawable.repeat_one_on
+                            REPEAT_MODE_ALL -> R.drawable.repeat_on
+                            else -> R.drawable.repeat
+                        },
+                    command = CommandToggleRepeatMode,
+                )
+
+            MediaNotificationAction.SHUFFLE ->
+                customNotificationButton(
+                    displayName = getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on),
+                    iconResId = if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle,
+                    command = CommandToggleShuffle,
+                )
+
+            MediaNotificationAction.START_RADIO ->
+                customNotificationButton(
+                    displayName = getString(R.string.start_radio),
+                    iconResId = R.drawable.radio,
+                    command = CommandToggleStartRadio,
+                    enabled = song != null && mediaMetadata?.isPodcast != true,
+                )
+
+            MediaNotificationAction.LIBRARY -> {
+                val inLibrary = song?.song?.inLibrary != null
+                customNotificationButton(
+                    displayName = getString(if (inLibrary) R.string.remove_from_library else R.string.add_to_library),
+                    iconResId = if (inLibrary) R.drawable.library_add_check else R.drawable.library_add,
+                    command = CommandToggleLibrary,
+                    enabled = song != null,
+                )
+            }
+
+            MediaNotificationAction.DOWNLOAD -> {
+                val downloadState = currentDownloadState
+                customNotificationButton(
+                    displayName =
+                        getString(
+                            when (downloadState) {
+                                Download.STATE_COMPLETED -> R.string.remove_download
+                                Download.STATE_QUEUED, Download.STATE_DOWNLOADING, Download.STATE_RESTARTING -> R.string.downloading
+                                else -> R.string.action_download
+                            },
+                        ),
+                    iconResId = if (downloadState == Download.STATE_COMPLETED) R.drawable.offline else R.drawable.download,
+                    command = CommandToggleDownload,
+                    enabled = canDownloadFromNotification(mediaMetadata, song) && downloadState != Download.STATE_REMOVING,
+                )
+            }
+
+            MediaNotificationAction.SLEEP_TIMER -> {
+                val active = ::sleepTimer.isInitialized && sleepTimer.isActive
+                customNotificationButton(
+                    displayName =
+                        if (active) {
+                            getString(R.string.media_notification_sleep_timer_cancel)
+                        } else {
+                            getString(
+                                R.string.media_notification_sleep_timer_start,
+                                resources.getQuantityString(
+                                    R.plurals.minute,
+                                    configuration.sleepTimerMinutes,
+                                    configuration.sleepTimerMinutes,
+                                ),
+                            )
+                        },
+                    iconResId = if (active) R.drawable.bedtime else R.drawable.timer,
+                    command = CommandToggleSleepTimer,
+                    enabled = active || mediaMetadata != null,
+                )
+            }
+
+            MediaNotificationAction.CLOSE ->
+                customNotificationButton(
+                    displayName = getString(R.string.close),
+                    iconResId = R.drawable.close,
+                    command = CommandClosePlayback,
+                    enabled = mediaMetadata != null && isTogetherSessionIdle(),
+                )
+        }
+    }
+
+    private fun customNotificationButton(
+        displayName: String,
+        @DrawableRes iconResId: Int,
+        command: SessionCommand,
+        enabled: Boolean = true,
+    ): CommandButton =
+        CommandButton
+            .Builder(CommandButton.ICON_UNDEFINED)
+            .setDisplayName(displayName)
+            .setCustomIconResId(iconResId)
+            .setSessionCommand(command)
+            .setEnabled(enabled)
+            .build()
+
+    private fun canDownloadFromNotification(
+        mediaMetadata: moe.rukamori.archivetune.models.MediaMetadata?,
+        song: Song?,
+    ): Boolean = mediaMetadata != null && !mediaMetadata.id.isLocalMediaId() && song?.song?.isLocal != true
+
+    private fun isTogetherSessionIdle(): Boolean =
+        togetherSessionState.value is moe.rukamori.archivetune.together.TogetherSessionState.Idle
+
+    private fun toggleCurrentDownload() {
+        val mediaMetadata = currentMediaMetadata.value ?: return
+        if (!canDownloadFromNotification(mediaMetadata, currentSong.value)) return
+        when (moduleDownloadUtil.downloads.value[mediaMetadata.id]?.state) {
+            Download.STATE_COMPLETED,
+            Download.STATE_QUEUED,
+            Download.STATE_DOWNLOADING,
+            Download.STATE_RESTARTING,
+            -> DownloadService.sendRemoveDownload(this, ExoDownloadService::class.java, mediaMetadata.id, false)
+
+            Download.STATE_REMOVING -> Unit
+
+            else ->
+                ioScope.launch {
+                    try {
+                        database.withTransaction { insert(mediaMetadata) }
+                        val downloadRequest =
+                            androidx.media3.exoplayer.offline.DownloadRequest
+                                .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
+                                .setCustomCacheKey(mediaMetadata.id)
+                                .setData(mediaMetadata.title.toByteArray())
+                                .build()
+                        DownloadService.sendAddDownload(
+                            this@MusicService,
+                            ExoDownloadService::class.java,
+                            downloadRequest,
+                            false,
+                        )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        reportException(error)
+                    }
+                }
+        }
+    }
+
+    private fun toggleSleepTimerFromNotification() {
+        if (!::sleepTimer.isInitialized) return
+        if (sleepTimer.isActive) {
+            sleepTimer.clear()
+        } else {
+            if (currentMediaMetadata.value == null) return
+            sleepTimer.start(
+                minutes = notificationConfiguration.sleepTimerMinutes,
+                finishCurrentSong = dataStore.get(SleepTimerFinishSongKey, false),
+                fadeOut = dataStore.get(SleepTimerFadeOutKey, true),
+            )
+        }
+        updateNotification()
+    }
+
+    private fun seekByNotificationIncrement(forward: Boolean) {
+        if (player.currentMediaItem == null || !player.isCurrentMediaItemSeekable) return
+        val incrementMs = notificationConfiguration.seekIncrementMs
+        val duration = player.duration
+        val target =
+            if (forward) {
+                val next = player.currentPosition + incrementMs
+                if (duration != C.TIME_UNSET && duration > 0L) next.coerceAtMost(duration) else next
+            } else {
+                (player.currentPosition - incrementMs).coerceAtLeast(0L)
+            }
+        player.seekTo(target)
+    }
+
+    private fun closePlaybackFromNotification() {
+        if (!isTogetherSessionIdle()) return
+        scope.launch {
+            if (dataStore.getAsync(PersistentQueueKey, true) && player.mediaItemCount > 0) {
+                saveQueueToDisk()
+            }
+            if (::sleepTimer.isInitialized) sleepTimer.clear()
+            stopAndClearPlayback(clearPersistentState = false)
+            requestDiscordSync(
+                reason = "media_notification_closed",
+                force = true,
+            )
+            stopForegroundAndSelf()
         }
     }
 
@@ -6734,6 +7021,41 @@ class MusicService :
                 ?.uri
                 ?.shouldBypassPlayerCache() == true
 
+    override fun onTracksChanged(tracks: Tracks) {
+        val mediaId = player.currentMediaItem?.mediaId ?: return
+        val selection = activeModuleAudio[mediaId] ?: return
+        val sampleRate =
+            tracks.groups
+                .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+                ?.takeIf { it.length > 0 }
+                ?.getTrackFormat(0)
+                ?.sampleRate
+                ?.takeIf { it > 0 }
+        ioScope.launch {
+            val stored = database.getFormatByIdBlocking(mediaId) ?: return@launch
+            if (sampleRate != null && stored.sampleRate == null) {
+                database.updateLocalAudioMetadata(mediaId, stored.bitrate, sampleRate)
+            }
+            if (stored.contentLength <= 0) {
+                val size = moduleStreamSize(selection)
+                if (size > 0) database.updateFormatContentLength(mediaId, size)
+            }
+        }
+    }
+
+    private fun moduleStreamSize(selection: ModuleAudioSelection): Long {
+        ContentMetadata
+            .getContentLength(playerCache.getContentMetadata(selection.cacheKey))
+            .takeIf { it > 0 }
+            ?.let { return it }
+        val completed =
+            moduleDownloadUtil.downloadManager.downloadIndex
+                .getDownload(selection.originalId)
+                ?.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED
+        if (!completed) return 0
+        return downloadCache.getCachedSpans(selection.cacheKey).sumOf { span -> span.length.coerceAtLeast(0L) }
+    }
+
     override fun onPlaybackStateChanged(
         @Player.State playbackState: Int,
     ) {
@@ -6742,11 +7064,7 @@ class MusicService :
         updateHistoryTrackingPlaybackState()
         if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
             enqueueCurrentHistorySessionForFinalization()
-            if (playbackState == Player.STATE_IDLE || crossfadeCoordinator?.hasSwitchedSession != true) {
-                cancelCrossfade(resetVolume = true)
-            } else {
-                crossfadeCoordinator?.wake()
-            }
+            cancelCrossfade(resetVolume = true)
             if (playbackState == Player.STATE_ENDED &&
                 !suppressAutoPlayback &&
                 player.currentMetadata?.isPodcast != true &&
@@ -6776,18 +7094,11 @@ class MusicService :
         reason: Int,
     ) {
         super.onPlayWhenReadyChanged(playWhenReady, reason)
-        crossfadeCoordinator?.wake()
         scheduleCrossfade()
-    }
-
-    override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
-        super.onPlaybackParametersChanged(playbackParameters)
-        crossfadeCoordinator?.setTailPlaybackParameters(playbackParameters)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         super.onIsPlayingChanged(isPlaying)
-        crossfadeCoordinator?.wake()
         if (isPlaying) {
             scheduleCrossfade()
         }
@@ -7113,8 +7424,8 @@ class MusicService :
         super.onPositionDiscontinuity(oldPosition, newPosition, reason)
         val isSeekDiscontinuity =
             reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
-        if (isSeekDiscontinuity && crossfadeCoordinator?.hasSwitchedSession != true) {
-            cancelCrossfade(resetVolume = true)
+        if (isSeekDiscontinuity) {
+            crossfadeHandler?.finishFade()
         }
         scheduleCrossfade()
     }
@@ -7842,17 +8153,6 @@ class MusicService :
             ).setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-    private fun createCrossfadeLoadControl(): DefaultLoadControl =
-        DefaultLoadControl
-            .Builder()
-            .setBufferDurationsMs(
-                CROSSFADE_MIN_BUFFER_MS,
-                CROSSFADE_MAX_BUFFER_MS,
-                CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
-                CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
-            ).setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-
     private fun createRenderersFactory() =
         object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -8343,7 +8643,7 @@ class MusicService :
         } catch (_: Exception) {
         }
         try {
-            localPlayer.removeListener(audioEffectPlayerListener)
+            localPlaybackPlayer.removeListener(audioEffectPlayerListener)
             player.removeListener(this)
             player.removeListener(sleepTimer)
             player.release()
@@ -8458,6 +8758,10 @@ class MusicService :
             originalDeleteIntent?.send()
         }.onFailure {
             Timber.tag(DISCORD_SYNC_TAG).w(it, "failed to forward original notification delete intent")
+        }
+
+        if (notificationConfiguration.stopOnDismiss && !player.isPlaying) {
+            closePlaybackFromNotification()
         }
     }
 
@@ -8619,19 +8923,10 @@ class MusicService :
         const val EFFECTIVE_VOLUME_RAMP_UP_MS = 350L
         const val EFFECTIVE_VOLUME_RAMP_DOWN_MS = 180L
         const val EFFECTIVE_VOLUME_RAMP_MIN_DELTA = 0.015f
-        const val CROSSFADE_MIN_BUFFER_BEFORE_START_MS = 5_000L
-        private val CROSSFADE_RETRY_POINTLESS_REASONS =
-            setOf(
-                CrossfadeAbandonReason.TailFailed,
-                CrossfadeAbandonReason.SyncDeadline,
-                CrossfadeAbandonReason.NextItemMissing,
-            )
         const val PRIMARY_MIN_BUFFER_MS = 20_000
         const val PRIMARY_MAX_BUFFER_MS = 60_000
         const val PRIMARY_BUFFER_FOR_PLAYBACK_MS = 750
         const val PRIMARY_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_500
-        const val CROSSFADE_MIN_BUFFER_MS = 15_000
-        const val CROSSFADE_MAX_BUFFER_MS = 45_000
         const val MIN_AUDIBLE_EFFECTIVE_VOLUME = 0.01f
         const val STUCK_MUTED_VOLUME_EPSILON = 0.001f
         const val AUDIBLE_PLAYBACK_VOLUME_CHECK_MS = 2_000L

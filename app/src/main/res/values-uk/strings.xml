@@ -179,7 +179,6 @@
     <string name="undo">Скасувати</string>
     <string name="lyrics_not_found">Текст пісні не знайдено</string>
     <string name="sleep_timer">Таймер вимкнення</string>
-    <string name="end_of_song">Кінець пісні</string>
     <plurals name="minute">
         <item quantity="one">%d хвилина</item>
         <item quantity="few">%d хвилини</item>
@@ -298,7 +297,6 @@
     <string name="blur">Розмиття</string>
     <string name="contrast">Контраст</string>
     <string name="brightness">Яскравість</string>
-    <string name="custom_value">Власне значення</string>
     <string name="show_button1_description">Увімкнути/вимкнути відображення кнопки 1 у функції «Rich Presence» Discord</string>
     <string name="show_button2_description">Увімкнути/вимкнути відображення кнопки 2 у функції «Rich Presence» Discord</string>
     <string name="discord_activity_type">Тип активності</string>
@@ -583,7 +581,6 @@
     <string name="together_server_error">Помилка сервера. Спробуйте ще раз пізніше</string>
     <string name="leave">Вийти</string>
     <string name="join">Доєднатися</string>
-    <string name="joined">Приєднався</string>
     <string name="loading">Завантаження</string>
     <string name="connecting">З\'єднання…</string>
     <string name="copy_link">Скопіювати посилання</string>

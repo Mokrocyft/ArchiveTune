@@ -295,7 +295,6 @@
     <string name="lyrics_not_found">Letra não encontrada</string>
     <string name="lyrics_word_sync">Sincronização por Palavra</string>
     <string name="sleep_timer">Temporizador de sono</string>
-    <string name="end_of_song">Fim da música</string>
     <plurals name="minute">
         <item quantity="one">1 minuto</item>
         <item quantity="many">%d minutos</item>
@@ -335,6 +334,11 @@
     <string name="app_icon_empty">Sem ícones da app disponíveis</string>
     <string name="app_icon_load_failed">Impossível carregar os ícones da app</string>
     <string name="app_icon_change_failed">Imposssível alterar o ícone da app</string>
+    <string name="app_icon_applying">A aplicar %1$s…</string>
+    <string name="app_icon_by_author">por %1$s</string>
+    <string name="app_icon_github_profile">Perfil do GitHub</string>
+    <string name="app_icon_details">Detalhes do ícone</string>
+    <string name="app_icon_use">Usar este ícone</string>
     <string name="theme">Tema</string>
     <string name="enable_dynamic_theme">Ativar tema dinâmico</string>
     <string name="random_theme_on_startup">Tema aleatório ao iniciar</string>
@@ -445,7 +449,6 @@
     <string name="blur">Desfoque</string>
     <string name="contrast">Contraste</string>
     <string name="brightness">Brilho</string>
-    <string name="custom_value">Valor personalizado</string>
     <string name="archivetune_canvas">ArchiveTune Canvas</string>
     <string name="archivetune_canvas_desc">Animar a capa do álbum durante a reprodução</string>
     <string name="player_background_style_v8_v9_desc">Indisponível com os estilos de reprodutor V8 e V9</string>
@@ -957,7 +960,6 @@
     <string name="together_server_error">Erro do servidor, tenta novamente mais tarde</string>
     <string name="leave">Sair</string>
     <string name="join">Entrar</string>
-    <string name="joined">Entraste</string>
     <string name="loading">A carregar</string>
     <string name="connecting">A conectar</string>
     <string name="copy_link">Copiar link</string>

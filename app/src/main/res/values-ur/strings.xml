@@ -276,7 +276,6 @@
     <string name="lyrics_not_found">بول نہ مل سکے</string>
     <string name="lyrics_word_sync">الفاظ کی ہم عہدی</string>
     <string name="sleep_timer">نیند ٹائمر</string>
-    <string name="end_of_song">گیت کا اختتام</string>
     <plurals name="minute">
         <item quantity="one">ایک منٹ</item>
         <item quantity="other">%d منٹ</item>
@@ -395,7 +394,6 @@
     <string name="blur">دھندلاوٹ</string>
     <string name="contrast">مقابلہ رنگ</string>
     <string name="brightness">چمک دمک</string>
-    <string name="custom_value">حسب ضرورت وصف</string>
     <string name="archivetune_canvas">‫ArchiveTune کینوس</string>
     <string name="archivetune_canvas_desc">‫سنتے دوران البم کی تصویر کو حرکت پذیر کیرں</string>
     <string name="player_background_style_v8_v9_desc">‫V8 اور V9 طرز سازندہ میں دستیاب نہیں</string>
@@ -542,6 +540,11 @@
     <string name="app_icon_empty">ایپ کی کوئ تصویرات دستیاب نہیں</string>
     <string name="app_icon_load_failed">ایپ کی تصویرات لاد نہیں سکا</string>
     <string name="app_icon_change_failed">ایپ کی تصویر بدل میں ناکام</string>
+    <string name="app_icon_applying">%1$s لاگو ہو رہا ہے…</string>
+    <string name="app_icon_by_author">از %1$s</string>
+    <string name="app_icon_github_profile">GitHub پروفائل</string>
+    <string name="app_icon_details">آئیکن کی تفصیلات</string>
+    <string name="app_icon_use">یہ آئیکن استعمال کریں</string>
     <string name="cache">کیش</string>
     <string name="image_cache">تصویراتی کیش</string>
     <string name="song_cache">گیت کا کیش</string>
@@ -946,7 +949,6 @@
     <string name="together_server_error">سرور کی تحریف، براہ مہربانی کچھ دیر بعد کوشش کریں</string>
     <string name="leave">رخصت</string>
     <string name="join">شامل</string>
-    <string name="joined">شامل ہوئے</string>
     <string name="loading">لادا جا رہا ہے</string>
     <string name="connecting">رابطہ ہورہا ہے</string>
     <string name="copy_link">ربط نکل</string>

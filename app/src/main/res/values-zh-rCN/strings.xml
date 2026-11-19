@@ -103,7 +103,6 @@
     <string name="undo">撤销</string>
     <string name="lyrics_not_found">未找到歌词</string>
     <string name="sleep_timer">睡眠计时器</string>
-    <string name="end_of_song">歌曲结束</string>
     <string name="error_no_internet">无网络连接</string>
     <string name="error_unknown">未知错误</string>
     <string name="action_like">喜爱</string>
@@ -391,7 +390,6 @@
     <string name="default_open_tab">默认打开标签页</string>
     <string name="action_shuffle_on">打开随机</string>
     <string name="custom">自定义</string>
-    <string name="custom_value">自定义变量</string>
     <string name="player">播放器</string>
     <string name="audio_quality_auto">自动</string>
     <string name="audio_quality_high">高质量</string>
@@ -539,7 +537,6 @@
     <string name="together_server_error">服务器错误，请稍后再试</string>
     <string name="leave">离开</string>
     <string name="join">加入</string>
-    <string name="joined">已加入</string>
     <string name="loading">加载中</string>
     <string name="connecting">连接中…</string>
     <string name="copy_link">复制链接</string>
@@ -702,6 +699,11 @@
     <string name="app_icon_empty">暂无可用应用图标</string>
     <string name="app_icon_load_failed">无法加载应用图标</string>
     <string name="app_icon_change_failed">无法更换应用图标</string>
+    <string name="app_icon_applying">正在应用 %1$s…</string>
+    <string name="app_icon_by_author">作者：%1$s</string>
+    <string name="app_icon_github_profile">GitHub 主页</string>
+    <string name="app_icon_details">图标详情</string>
+    <string name="app_icon_use">使用此图标</string>
     <string name="font_preference">字体</string>
     <string name="font_preference_desc">选择应用字体来源</string>
     <string name="font_preference_default">默认</string>

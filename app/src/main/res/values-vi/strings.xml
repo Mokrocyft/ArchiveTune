@@ -193,7 +193,6 @@
     <string name="undo">Khôi phục</string>
     <string name="lyrics_not_found">Không tìm thấy lời bài hát</string>
     <string name="sleep_timer">Hẹn giờ ngủ</string>
-    <string name="end_of_song">Cuối bài hát</string>
     <plurals name="minute">
         <item quantity="other">%d phút</item>
     </plurals>
@@ -303,7 +302,6 @@
     <string name="blur">Làm mờ</string>
     <string name="contrast">Độ tương phản</string>
     <string name="brightness">Độ sáng</string>
-    <string name="custom_value">Giá trị tùy chỉnh</string>
     <string name="show_button1_description">Bật/tắt hiển thị nút 1 trong Discord Rich Presence</string>
     <string name="show_button2_description">Bật/tắt hiển thị nút 2 trong Discord Rich Presence</string>
     <string name="discord_activity_type">Loại hoạt động</string>
@@ -597,7 +595,6 @@
     <string name="together_server_error">Lỗi máy chủ, vui lòng thử lại sau</string>
     <string name="leave">Rời đi</string>
     <string name="join">Tham gia</string>
-    <string name="joined">Đã tham gia</string>
     <string name="loading">Đang tải</string>
     <string name="connecting">Đang kết nối</string>
     <string name="copy_link">Sao chép liên kết</string>
@@ -911,6 +908,11 @@
     <string name="app_icon_empty">Không có biểu tượng</string>
     <string name="app_icon_load_failed">Không thể tải biểu tượng ứng dụng</string>
     <string name="app_icon_change_failed">Không thể đổi biểu tượng ứng dụng</string>
+    <string name="app_icon_applying">Đang áp dụng %1$s…</string>
+    <string name="app_icon_by_author">bởi %1$s</string>
+    <string name="app_icon_github_profile">Hồ sơ GitHub</string>
+    <string name="app_icon_details">Chi tiết biểu tượng</string>
+    <string name="app_icon_use">Dùng biểu tượng này</string>
     <string name="force_high_refresh_rate">Ép tần số quét cao</string>
     <string name="max_supported_refresh_rate">Cao nhất được hỗ trợ: %1$d Hz</string>
     <string name="view_debug_logs_description">Xem và lọc nhật ký ứng dụng</string>

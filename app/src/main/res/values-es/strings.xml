@@ -165,7 +165,6 @@
     <string name="undo">Deshacer</string>
     <string name="lyrics_not_found">Letras no encontradas</string>
     <string name="sleep_timer">Temporizador de reposo</string>
-    <string name="end_of_song">Fin de la canción</string>
     <plurals name="minute">
         <item quantity="one">%d minuto</item>
         <item quantity="many">%d minutos</item>
@@ -279,7 +278,6 @@
     <string name="blur">Desenfoque</string>
     <string name="contrast">Contraste</string>
     <string name="brightness">Brillo</string>
-    <string name="custom_value">Valor personalizado</string>
     <string name="archivetune_canvas">ArchiveTune Canvas</string>
     <string name="archivetune_canvas_desc">Animar la portada del álbum mientras se reproduce</string>
     <string name="show_button1_description">Alternar la visibilidad del botón 1 en Discord Rich Presence</string>
@@ -549,7 +547,6 @@
     <string name="together_server_error">Error del servidor, por favor, inténtalo de nuevo más tarde</string>
     <string name="leave">Dejar</string>
     <string name="join">Únete</string>
-    <string name="joined">Te uniste</string>
     <string name="loading">Cargando</string>
     <string name="connecting">Conectando</string>
     <string name="copy_link">Copiar enlace</string>
@@ -774,6 +771,11 @@
     <string name="library_top_mixes_refresh">Actualizar las mezclas</string>
     <string name="library_top_mixes_configure_ai">Configurar la IA</string>
     <string name="app_icon_change_failed">No he podido cambiar el icono de la aplicación</string>
+    <string name="app_icon_applying">Aplicando %1$s…</string>
+    <string name="app_icon_by_author">por %1$s</string>
+    <string name="app_icon_github_profile">Perfil de GitHub</string>
+    <string name="app_icon_details">Detalles del icono</string>
+    <string name="app_icon_use">Usar este icono</string>
     <string name="app_icon_load_failed">No se han podido cargar los iconos de las aplicaciones</string>
     <string name="app_icon_empty">Sin iconos para la aplicación</string>
     <plurals name="app_icon_count">

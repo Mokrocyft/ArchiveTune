@@ -32,6 +32,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -70,7 +71,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -89,8 +89,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -152,6 +155,7 @@ import moe.rukamori.archivetune.LocalDownloadUtil
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.canvas.CanvasPlaybackRequest
+import moe.rukamori.archivetune.ui.utils.LocalIsTvDevice
 import moe.rukamori.archivetune.ui.utils.navigateToAlbum
 import moe.rukamori.archivetune.ui.utils.navigateToArtist
 import moe.rukamori.archivetune.viewmodels.CanvasPlaybackViewModel
@@ -185,6 +189,7 @@ import moe.rukamori.archivetune.constants.ThumbnailCornerRadiusKey
 import moe.rukamori.archivetune.extensions.metadata
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.ui.back.BackOwnershipPolicy
 import moe.rukamori.archivetune.ui.component.BottomSheet
 import moe.rukamori.archivetune.ui.component.BottomSheetState
 import moe.rukamori.archivetune.ui.component.LocalBottomSheetPageState
@@ -206,6 +211,7 @@ import moe.rukamori.archivetune.ui.utils.ShowMediaInfo
 import moe.rukamori.archivetune.ui.utils.YtimgResizePolicy
 import moe.rukamori.archivetune.ui.utils.getNextFallbackUrl
 import moe.rukamori.archivetune.ui.utils.resize
+import moe.rukamori.archivetune.ui.utils.tvFocusIndicationOrNull
 import moe.rukamori.archivetune.utils.ImageBlurUtils
 import moe.rukamori.archivetune.utils.makeTimeString
 import moe.rukamori.archivetune.utils.rememberEnumPreference
@@ -311,6 +317,8 @@ fun BottomSheetPlayer(
     immersivePlayerViewModel: ImmersivePlayerViewModel = hiltViewModel(),
     queueViewModel: QueueViewModel = hiltViewModel(),
     lyricsSyncOffsetViewModel: LyricsSyncOffsetViewModel = hiltViewModel(),
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    exitLeftFocusRequester: FocusRequester? = null,
 ) {
     val context = LocalContext.current
     val menuState = LocalMenuState.current
@@ -432,8 +440,7 @@ fun BottomSheetPlayer(
     val currentSongLiked = currentSong?.song?.liked == true
     val queueTitle by playerConnection.queueTitle.collectAsState()
     val currentFormat by playerConnection.currentFormat.collectAsState(initial = null)
-    val queueWindows by playerConnection.queueWindows.collectAsState()
-    val currentWindowIndex by playerConnection.currentWindowIndex.collectAsState()
+    val queue by playerConnection.queue.collectAsState()
     val deviceMusicVolumeController = rememberDeviceMusicVolumeController()
     val onPlayerVolumeChange =
         remember(deviceMusicVolumeController) {
@@ -841,26 +848,21 @@ fun BottomSheetPlayer(
         }
     }
 
-    var showSleepTimerDialog by remember {
+    var showSleepTimerSheet by remember {
         mutableStateOf(false)
     }
 
     var sleepTimerValue by remember {
         mutableFloatStateOf(30f)
     }
-    if (showSleepTimerDialog) {
-        SleepTimerDialog(
-            onDismiss = { showSleepTimerDialog = false },
-            onConfirm = { mins ->
-                showSleepTimerDialog = false
-                sleepTimerValue = mins.toFloat()
-                playerConnection.service.sleepTimer.start(mins)
+    if (showSleepTimerSheet) {
+        SleepTimerBottomSheet(
+            value = sleepTimerValue,
+            onValueChange = { sleepTimerValue = it },
+            onDismiss = { showSleepTimerSheet = false },
+            onStart = { minutes, finishCurrentSong, fadeOut ->
+                playerConnection.service.sleepTimer.start(minutes, finishCurrentSong, fadeOut)
             },
-            onEndOfSong = {
-                showSleepTimerDialog = false
-                playerConnection.service.sleepTimer.start(-1)
-            },
-            initialValue = sleepTimerValue
         )
     }
 
@@ -887,7 +889,7 @@ fun BottomSheetPlayer(
                                 if (sleepTimerEnabled) {
                                     playerConnection.service.sleepTimer.clear()
                                 } else {
-                                    showSleepTimerDialog = true
+                                    showSleepTimerSheet = true
                                 }
                             },
                             onShowDetailsDialog = {
@@ -1006,24 +1008,38 @@ fun BottomSheetPlayer(
             }
         }
 
-    val isPlayerVisible by remember(state) {
-        derivedStateOf { state.isExpandedOrExpanding || state.progress > 0f }
-    }
-    BackHandler(enabled = !aodModeEnabled && isPlayerVisible && !queueVisible) {
-        when {
-            isLyricsScreenVisible -> isLyricsScreenVisible = false
-            state.isExpandedOrExpanding -> state.collapseSoft()
+    BackHandler(
+        enabled =
+            BackOwnershipPolicy.playerHandlesBack(
+                aodModeEnabled = aodModeEnabled,
+                queueVisible = queueVisible,
+                isExpandedOrExpanding = state.isExpandedOrExpanding,
+            ),
+    ) {
+        if (isLyricsScreenVisible) {
+            isLyricsScreenVisible = false
+        } else {
+            state.collapseSoft()
         }
     }
 
-    val focusRequester = remember { FocusRequester() }
+    val isTvDevice = LocalIsTvDevice.current
+    var isSheetSelfFocused by remember { mutableStateOf(false) }
+    var expandedPlayerHeldFocus by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.isExpanded) {
         if (state.isExpanded) {
-            focusRequester.requestFocus()
+            expandedPlayerHeldFocus = focusRequester.requestFocus()
         }
         if (!state.isExpanded && aodModeEnabled) {
             playerConnection.aodModeEnabled.value = false
+        }
+    }
+
+    LaunchedEffect(state.isCollapsed, isTvDevice) {
+        if (isTvDevice && state.isCollapsed && expandedPlayerHeldFocus) {
+            expandedPlayerHeldFocus = false
+            focusRequester.requestFocus()
         }
     }
 
@@ -1032,9 +1048,42 @@ fun BottomSheetPlayer(
         modifier =
             modifier
                 .focusRequester(focusRequester)
-                .focusable()
+                .focusProperties {
+                    onExit = {
+                        if (state.isExpandedOrExpanding) {
+                            val railTarget = exitLeftFocusRequester
+                            when (requestedFocusDirection) {
+                                FocusDirection.Left -> {
+                                    if (railTarget != null) railTarget.requestFocus() else cancelFocusChange()
+                                }
+
+                                FocusDirection.Up,
+                                FocusDirection.Down,
+                                FocusDirection.Right,
+                                FocusDirection.Next,
+                                FocusDirection.Previous,
+                                -> {
+                                    cancelFocusChange()
+                                }
+
+                                else -> {}
+                            }
+                        }
+                    }
+                }.onFocusChanged { focusState ->
+                    isSheetSelfFocused = focusState.isFocused
+                    if (!state.isCollapsed) {
+                        expandedPlayerHeldFocus = focusState.hasFocus
+                    }
+                }.then(if (isTvDevice) Modifier.focusGroup() else Modifier.focusable())
                 .onKeyEvent { keyEvent ->
                     if (keyEvent.type != KeyEventType.KeyDown || state.isCollapsed) return@onKeyEvent false
+                    val isDirectionalKey =
+                        keyEvent.key == Key.DirectionLeft ||
+                            keyEvent.key == Key.DirectionRight ||
+                            keyEvent.key == Key.DirectionUp ||
+                            keyEvent.key == Key.DirectionDown
+                    if (isDirectionalKey && !isSheetSelfFocused) return@onKeyEvent false
 
                     when (keyEvent.key) {
                         Key.DirectionLeft -> {
@@ -1175,8 +1224,8 @@ fun BottomSheetPlayer(
         val updatedOnSliderValueChangeFinished by rememberUpdatedState(onSliderValueChangeFinished)
 
         val nextUpMetadata =
-            remember(queueWindows, currentWindowIndex) {
-                queueWindows.getOrNull(currentWindowIndex + 1)?.mediaItem?.metadata
+            remember(queue) {
+                queue.windows.getOrNull(queue.currentIndex + 1)?.mediaItem?.metadata
             }
 
         val enrichedMetadata =
@@ -1217,7 +1266,7 @@ fun BottomSheetPlayer(
             if (sleepTimerEnabled) {
                 playerConnection.service.sleepTimer.clear()
             } else {
-                showSleepTimerDialog = true
+                showSleepTimerSheet = true
             }
         }
         val showPlayerMenu: (MediaMetadata) -> Unit = { metadata ->
@@ -1430,7 +1479,7 @@ fun BottomSheetPlayer(
                                                     if (sleepTimerEnabled) {
                                                         playerConnection.service.sleepTimer.clear()
                                                     } else {
-                                                        showSleepTimerDialog = true
+                                                        showSleepTimerSheet = true
                                                     }
                                                 },
                                                 onShowDetailsDialog = {
@@ -1582,7 +1631,7 @@ fun BottomSheetPlayer(
                                 if (sleepTimerEnabled) {
                                     playerConnection.service.sleepTimer.clear()
                                 } else {
-                                    showSleepTimerDialog = true
+                                    showSleepTimerSheet = true
                                 }
                             },
                             sleepTimerEnabled = sleepTimerEnabled,
@@ -1598,7 +1647,7 @@ fun BottomSheetPlayer(
                                             if (sleepTimerEnabled) {
                                                 playerConnection.service.sleepTimer.clear()
                                             } else {
-                                                showSleepTimerDialog = true
+                                                showSleepTimerSheet = true
                                             }
                                         },
                                         onShowDetailsDialog = {
@@ -1725,7 +1774,7 @@ fun BottomSheetPlayer(
                                                         if (sleepTimerEnabled) {
                                                             playerConnection.service.sleepTimer.clear()
                                                         } else {
-                                                            showSleepTimerDialog = true
+                                                            showSleepTimerSheet = true
                                                         }
                                                     },
                                                     onShowDetailsDialog = {
@@ -1876,7 +1925,7 @@ fun BottomSheetPlayer(
                                 if (sleepTimerEnabled) {
                                     playerConnection.service.sleepTimer.clear()
                                 } else {
-                                    showSleepTimerDialog = true
+                                    showSleepTimerSheet = true
                                 }
                             },
                             sleepTimerEnabled = sleepTimerEnabled,
@@ -1892,7 +1941,7 @@ fun BottomSheetPlayer(
                                             if (sleepTimerEnabled) {
                                                 playerConnection.service.sleepTimer.clear()
                                             } else {
-                                                showSleepTimerDialog = true
+                                                showSleepTimerSheet = true
                                             }
                                         },
                                         onShowDetailsDialog = {
@@ -2421,7 +2470,7 @@ private fun LittlePlayerContent(
                             .size(collapseIconSize)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                                indication = tvFocusIndicationOrNull(),
                                 onClick = onCollapse,
                             ),
                 )
@@ -2442,7 +2491,7 @@ private fun LittlePlayerContent(
                             .size(iconSize)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                                indication = tvFocusIndicationOrNull(),
                                 onClick = onToggleLike,
                             ),
                 )
@@ -2458,7 +2507,7 @@ private fun LittlePlayerContent(
                             .size(iconSize)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                                indication = tvFocusIndicationOrNull(),
                                 onClick = onExpandQueue,
                             ),
                 )
@@ -2474,7 +2523,7 @@ private fun LittlePlayerContent(
                             .size(iconSize)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                                indication = tvFocusIndicationOrNull(),
                                 onClick = onMenuClick,
                             ),
                 )

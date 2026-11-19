@@ -173,7 +173,6 @@
     <string name="undo">تراجع</string>
     <string name="lyrics_not_found">لم يتم العثور على كلمات الأغاني</string>
     <string name="sleep_timer">مؤقت النوم</string>
-    <string name="end_of_song">نهاية الأغنية</string>
     <plurals name="minute">
         <item quantity="zero">0 دقيقة</item>
         <item quantity="one">دقيقة واحدة</item>
@@ -286,7 +285,6 @@
     <string name="blur">ضبابية</string>
     <string name="contrast">التباين</string>
     <string name="brightness">السطوع</string>
-    <string name="custom_value">القيمة المخصصة</string>
     <string name="show_button1_description">تبديل رؤية الزر 1 في حالة حضور ديسكورد</string>
     <string name="show_button2_description">تبديل رؤية الزر 2 في حالة حضور ديسكورد</string>
     <string name="discord_activity_type">نوع النشاط</string>
@@ -650,6 +648,11 @@
     <string name="app_icon_empty">لا تتوفر أيقونات للتطبيق</string>
     <string name="app_icon_load_failed">تعذر تحميل أيقونات التطبيق</string>
     <string name="app_icon_change_failed">تعذر تغيير أيقونة التطبيق</string>
+    <string name="app_icon_applying">جارٍ تطبيق %1$s…</string>
+    <string name="app_icon_by_author">بواسطة %1$s</string>
+    <string name="app_icon_github_profile">ملف GitHub الشخصي</string>
+    <string name="app_icon_details">تفاصيل الأيقونة</string>
+    <string name="app_icon_use">استخدام هذه الأيقونة</string>
     <string name="random_theme_on_startup">سمة عشوائية عند بدء التشغيل</string>
     <string name="random_theme_on_startup_desc">تطبيق لوحة ألوان عشوائية في كل مرة يفتح فيها التطبيق</string>
     <string name="font_preference">الخط</string>
@@ -990,7 +993,6 @@
     <string name="together_server_error">خطأ في الخادم، يرجى المحاولة لاحقًا</string>
     <string name="leave">مغادرة</string>
     <string name="join">انضمام</string>
-    <string name="joined">تم الانضمام</string>
     <string name="loading">جاري التحميل</string>
     <string name="connecting">جاري الاتصال</string>
     <string name="copy_link">نسخ الرابط</string>

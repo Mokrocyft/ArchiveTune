@@ -16,8 +16,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
-import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -28,6 +26,7 @@ import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -49,7 +48,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,8 +76,6 @@ import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingActionButtonMenu
@@ -88,6 +84,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalRippleThemeConfiguration
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -117,6 +114,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -130,6 +128,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -279,6 +278,7 @@ import moe.rukamori.archivetune.playback.queues.LocalAlbumRadio
 import moe.rukamori.archivetune.playback.queues.Queue
 import moe.rukamori.archivetune.playback.queues.YouTubeAlbumRadio
 import moe.rukamori.archivetune.playback.queues.YouTubeQueue
+import moe.rukamori.archivetune.ui.back.BackOwnershipPolicy
 import moe.rukamori.archivetune.ui.component.BottomSheetMenu
 import moe.rukamori.archivetune.ui.component.BottomSheetPage
 import moe.rukamori.archivetune.ui.component.COLLAPSED_ANCHOR
@@ -315,6 +315,7 @@ import moe.rukamori.archivetune.ui.screens.search.LocalSearchScreen
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchResultArgument
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchResultRoutePrefix
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchScreen
+import moe.rukamori.archivetune.ui.screens.search.OnlineSearchSortMenu
 import moe.rukamori.archivetune.ui.screens.search.decodeOnlineSearchQuery
 import moe.rukamori.archivetune.ui.screens.search.onlineSearchResultRoute
 import moe.rukamori.archivetune.ui.screens.settings.DarkMode
@@ -324,8 +325,11 @@ import moe.rukamori.archivetune.ui.theme.ColorSaver
 import moe.rukamori.archivetune.ui.theme.DefaultThemeColor
 import moe.rukamori.archivetune.ui.theme.extractThemeColor
 import moe.rukamori.archivetune.ui.theme.extractWallpaperThemeColor
+import moe.rukamori.archivetune.ui.utils.LocalIsTvDevice
+import moe.rukamori.archivetune.ui.utils.TvRippleThemeConfiguration
 import moe.rukamori.archivetune.ui.utils.appBarScrollBehavior
 import moe.rukamori.archivetune.ui.utils.backToMain
+import moe.rukamori.archivetune.ui.utils.isTvDevice
 import moe.rukamori.archivetune.ui.utils.navigateToAlbum
 import moe.rukamori.archivetune.ui.utils.navigateToArtist
 import moe.rukamori.archivetune.ui.utils.resetHeightOffset
@@ -347,7 +351,7 @@ import moe.rukamori.archivetune.viewmodels.HomeViewModel
 import moe.rukamori.archivetune.viewmodels.MainMenuViewModel
 import moe.rukamori.archivetune.viewmodels.NetworkBannerViewModel
 import moe.rukamori.archivetune.viewmodels.NewsViewModel
-import moe.rukamori.archivetune.viewmodels.OnlineSearchSort
+import moe.rukamori.archivetune.viewmodels.OnlineSearchViewModel
 import moe.rukamori.archivetune.viewmodels.WhatsNewState
 import moe.rukamori.archivetune.viewmodels.WhatsNewViewModel
 import java.util.Locale
@@ -411,6 +415,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 isMusicServiceBound = true
                 if (service is MusicBinder) {
+                    playerConnection?.dispose()
                     playerConnection =
                         PlayerConnection(this@MainActivity, service, database, lifecycleScope)
                     playPendingDeepLinkQueueIfReady()
@@ -580,8 +585,9 @@ class MainActivity : ComponentActivity() {
             playerConnection?.service?.stopAndClearPlayback(clearPersistentState = true)
             safeUnbindMusicService()
             stopService(Intent(this, MusicService::class.java))
-            playerConnection = null
         }
+        playerConnection?.dispose()
+        playerConnection = null
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -609,6 +615,16 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    moveTaskToBack(true)
+                }
+            },
+        )
+
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_LTR
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -1017,13 +1033,6 @@ class MainActivity : ComponentActivity() {
                     val isAppUpdateScreen = currentRoute?.substringBefore('?') == AppUpdateRoute
                     val currentNavigationLifecycle = navBackStackEntry?.lifecycle?.currentStateFlow
                         ?.collectAsStateWithLifecycle()?.value
-                    val onlineSearchEncodedQuery =
-                        navBackStackEntry
-                            ?.takeIf {
-                                it.destination.route?.startsWith(OnlineSearchResultRoutePrefix) == true
-                            }?.arguments
-                            ?.getString(OnlineSearchResultArgument)
-                    var onlineSearchSort by rememberSaveable { mutableStateOf(OnlineSearchSort.DEFAULT) }
                     val isYearInMusicScreen = currentRoute?.startsWith("year_in_music") == true
                     val isYearInMusicStory = if (isYearInMusicScreen) {
                         navBackStackEntry?.savedStateHandle?.getStateFlow("recap_immersive", false)
@@ -1083,10 +1092,8 @@ class MainActivity : ComponentActivity() {
                     val searchBarFocusRequester = remember { FocusRequester() }
                     val tvRailFocusRequester = remember { FocusRequester() }
                     val contentAreaFocusRequester = remember { FocusRequester() }
+                    val playerFocusRequester = remember { FocusRequester() }
 
-                    LaunchedEffect(onlineSearchEncodedQuery) {
-                        onlineSearchSort = OnlineSearchSort.DEFAULT
-                    }
 
                     val openSearch: () -> Unit = {
                         onActiveChange(true)
@@ -1729,8 +1736,10 @@ class MainActivity : ComponentActivity() {
                     val playerBackDispatcherOwner = checkNotNull(LocalNavigationEventDispatcherOwner.current)
                     val screenBackEnabled by remember(playerBottomSheetState, isAppUpdateScreen) {
                         derivedStateOf {
-                            isAppUpdateScreen ||
-                                (!playerBottomSheetState.isExpandedOrExpanding && playerBottomSheetState.progress <= 0f)
+                            BackOwnershipPolicy.screensHandleBack(
+                                isAppUpdateScreen = isAppUpdateScreen,
+                                isExpandedOrExpanding = playerBottomSheetState.isExpandedOrExpanding,
+                            )
                         }
                     }
                     val screenBackDispatcherOwner =
@@ -1749,6 +1758,9 @@ class MainActivity : ComponentActivity() {
                         LocalDownloadUtil provides downloadUtil,
                         LocalShimmerTheme provides ShimmerTheme,
                         LocalSyncUtils provides syncUtils,
+                        LocalIsTvDevice provides isTvDevice,
+                        LocalRippleThemeConfiguration provides
+                            if (isTvDevice) TvRippleThemeConfiguration else LocalRippleThemeConfiguration.current,
                         moe.rukamori.archivetune.ui.component.LocalBottomSheetPageState provides bottomSheetPageState,
                         moe.rukamori.archivetune.ui.component.LocalMenuState provides menuState,
                     ) {
@@ -1772,9 +1784,11 @@ class MainActivity : ComponentActivity() {
                                                     currentRoute
                                                 },
                                             modifier = Modifier,
-                                            firstItemFocusRequester = tvRailFocusRequester,
+                                            selectedItemFocusRequester = tvRailFocusRequester,
                                             contentFocusRequester =
-                                                if (active ||
+                                                if (playerBottomSheetState.isExpandedOrExpanding) {
+                                                    playerFocusRequester
+                                                } else if (active ||
                                                     navBackStackEntry?.destination?.route?.startsWith(OnlineSearchResultRoutePrefix) == true
                                                 ) {
                                                     searchBarFocusRequester
@@ -2185,10 +2199,21 @@ class MainActivity : ComponentActivity() {
                                                                 )
                                                             }
                                                         } else if (currentRoute?.startsWith(OnlineSearchResultRoutePrefix) == true) {
-                                                            OnlineSearchSortMenu(
-                                                                selectedSort = onlineSearchSort,
-                                                                onSortSelected = { onlineSearchSort = it },
-                                                            )
+                                                            navBackStackEntry?.let { onlineSearchEntry ->
+                                                                key(onlineSearchEntry.id) {
+                                                                    val onlineSearchViewModel: OnlineSearchViewModel =
+                                                                        hiltViewModel(onlineSearchEntry)
+                                                                    val onlineSearchSort by
+                                                                        onlineSearchViewModel.sort.collectAsStateWithLifecycle()
+                                                                    OnlineSearchSortMenu(
+                                                                        sort = onlineSearchSort,
+                                                                        pureBlack = pureBlack,
+                                                                        onSortKeySelected = onlineSearchViewModel::selectSortKey,
+                                                                        onSortDescendingChange =
+                                                                            onlineSearchViewModel::selectSortDescending,
+                                                                    )
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 },
@@ -2301,6 +2326,8 @@ class MainActivity : ComponentActivity() {
                                                     pureBlack = pureBlack,
                                                     navigationProximityProvider = navigationProximityProvider,
                                                     navigationBarMode = navigationBarMode,
+                                                    focusRequester = playerFocusRequester,
+                                                    exitLeftFocusRequester = if (isTvDevice && useRail) tvRailFocusRequester else null,
                                                 )
                                             }
 
@@ -2628,8 +2655,13 @@ class MainActivity : ComponentActivity() {
                                                     if (isTvDevice) {
                                                         Modifier
                                                             .focusRequester(contentAreaFocusRequester)
-                                                            .focusGroup()
-                                                            .focusable()
+                                                            .focusProperties {
+                                                                onEnter = {
+                                                                    if (playerBottomSheetState.isExpandedOrExpanding) {
+                                                                        cancelFocusChange()
+                                                                    }
+                                                                }
+                                                            }.focusGroup()
                                                     } else {
                                                         Modifier
                                                     },
@@ -2650,7 +2682,6 @@ class MainActivity : ComponentActivity() {
                                             homeScrollConnection = homeScrollBehavior.nestedScrollConnection,
                                             searchScrollConnection = searchScrollBehavior.nestedScrollConnection,
                                             libraryScrollBehavior = libraryScrollBehavior,
-                                            onlineSearchSort = onlineSearchSort,
                                         )
                                     }
                                 }
@@ -3352,72 +3383,4 @@ private fun TranslucentTopAppBarIconButton(
             ),
         content = content,
     )
-}
-
-@Composable
-private fun OnlineSearchSortMenu(
-    selectedSort: OnlineSearchSort,
-    onSortSelected: (OnlineSearchSort) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val options =
-        remember {
-            listOf(
-                OnlineSearchSort.DEFAULT,
-                OnlineSearchSort.VIEWS,
-            )
-        }
-
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(
-                painter = painterResource(R.drawable.filter_alt),
-                contentDescription = null,
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            options.forEach { sort ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text =
-                                stringResource(
-                                    when (sort) {
-                                        OnlineSearchSort.DEFAULT -> R.string.default_style
-                                        OnlineSearchSort.VIEWS -> R.string.views
-                                    },
-                                ),
-                        )
-                    },
-                    onClick = {
-                        expanded = false
-                        onSortSelected(sort)
-                    },
-                    leadingIcon = {
-                        if (sort == selectedSort) {
-                            Icon(
-                                painter = painterResource(R.drawable.done),
-                                contentDescription = null,
-                            )
-                        } else {
-                            Spacer(Modifier.size(24.dp))
-                        }
-                    },
-                )
-            }
-        }
-    }
-}
-
-private fun Context.isTvDevice(): Boolean {
-    val isTelevisionUiMode =
-        (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
-            Configuration.UI_MODE_TYPE_TELEVISION
-    return isTelevisionUiMode ||
-        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-        packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
 }

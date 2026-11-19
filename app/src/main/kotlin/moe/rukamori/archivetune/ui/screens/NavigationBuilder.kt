@@ -77,6 +77,7 @@ import moe.rukamori.archivetune.ui.screens.settings.LocalSongSettingsRoute
 import moe.rukamori.archivetune.ui.screens.settings.LogcatScreen
 import moe.rukamori.archivetune.ui.screens.settings.LyricsAnimationSettings
 import moe.rukamori.archivetune.ui.screens.settings.LyricsSettings
+import moe.rukamori.archivetune.ui.screens.settings.MediaNotificationSettings
 import moe.rukamori.archivetune.ui.screens.settings.MusicTogetherScreen
 import moe.rukamori.archivetune.ui.screens.settings.PalettePickerScreen
 import moe.rukamori.archivetune.ui.screens.settings.PlayerSettings
@@ -86,7 +87,6 @@ import moe.rukamori.archivetune.ui.screens.settings.StorageSettings
 import moe.rukamori.archivetune.ui.screens.settings.ThemeCreatorScreen
 import moe.rukamori.archivetune.ui.screens.settings.UpdateScreen
 import moe.rukamori.archivetune.viewmodels.HomeViewModel
-import moe.rukamori.archivetune.viewmodels.OnlineSearchSort
 
 @OptIn(ExperimentalMaterial3Api::class)
 fun NavGraphBuilder.navigationBuilder(
@@ -98,7 +98,6 @@ fun NavGraphBuilder.navigationBuilder(
     onUpdateReleaseChecked: (AppUpdateRelease?) -> Unit = {},
     homeScrollConnection: NestedScrollConnection? = null,
     searchScrollConnection: NestedScrollConnection? = null,
-    onlineSearchSort: OnlineSearchSort = OnlineSearchSort.DEFAULT,
     libraryScrollBehavior: TopAppBarScrollBehavior,
 ) {
     composable(Screens.Home.route) {
@@ -238,10 +237,7 @@ fun NavGraphBuilder.navigationBuilder(
             }
         },
     ) {
-        OnlineSearchResult(
-            navController = navController,
-            searchSort = onlineSearchSort,
-        )
+        OnlineSearchResult(navController = navController)
     }
     composable(
         route = "album/{albumId}",
@@ -458,6 +454,9 @@ fun NavGraphBuilder.navigationBuilder(
     }
     composable("settings/player") {
         PlayerSettings(navController)
+    }
+    composable("settings/media_notification") {
+        MediaNotificationSettings(navController)
     }
     composable("settings/modules") {
         moe.rukamori.archivetune.ui.screens.settings.ModulesSettings(navController)
