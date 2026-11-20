@@ -93,7 +93,6 @@ android {
         buildConfigField("String", "DATA_SERVER_URL", dataServerUrl.asBuildConfigString())
         buildConfigField("String", "API_BEARER_TOKEN", apiBearerToken.asBuildConfigString())
         buildConfigField("boolean", "GATEKEEPER_ENABLED", "false")
-        buildConfigField("boolean", "LEAK_CANARY_TOGGLE_AVAILABLE", "false")
 
         val nightlyBuildHash =
             (
@@ -132,6 +131,14 @@ android {
                 ?: githubRepo
         buildConfigField("String", "RELEASE_GITHUB_OWNER", releaseGithubOwner.asBuildConfigString())
         buildConfigField("String", "RELEASE_GITHUB_REPO", releaseGithubRepo.asBuildConfigString())
+        
+        externalNativeBuild {
+            cmake {
+                cFlags("-ffile-prefix-map=${rootProject.projectDir}=.")
+                cppFlags("-ffile-prefix-map=${rootProject.projectDir}=.")
+                arguments("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--build-id=none")
+            }
+        }
     }
 
     externalNativeBuild {
@@ -232,18 +239,6 @@ android {
             applicationIdSuffix = ".debug"
             isDebuggable = true
         }
-        create("nightly") {
-            applicationIdSuffix = ".nightly"
-            isDebuggable = false
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            buildConfigField("boolean", "LEAK_CANARY_TOGGLE_AVAILABLE", "true")
-            matchingFallbacks += listOf("release")
-        }
     }
 
     compileOptions {
@@ -319,8 +314,6 @@ dependencies {
     compileOnly("androidx.compose.ui:ui-tooling-preview:${libs.versions.compose.get()}")
     debugImplementation("androidx.compose.ui:ui-tooling-preview:${libs.versions.compose.get()}")
     debugImplementation(libs.compose.ui.tooling)
-    debugImplementation(libs.leakcanary.android)
-    add("nightlyImplementation", libs.leakcanary.android)
     implementation(libs.compose.animation)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.reorderable)
@@ -419,7 +412,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.turbine)
     implementation(libs.translator)
-    implementation("androidx.lifecycle:lifecycle-process:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.11.1")
     implementation("androidx.compose.material3.adaptive:adaptive:1.4.0-alpha03")
     implementation(libs.accompanist.lyrics.ui)
     implementation(libs.accompanist.lyrics.core)
