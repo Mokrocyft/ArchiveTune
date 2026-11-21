@@ -191,6 +191,7 @@ import moe.rukamori.archivetune.constants.PauseListenHistoryKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
 import moe.rukamori.archivetune.constants.PermanentShuffleKey
 import moe.rukamori.archivetune.constants.PersistentQueueKey
+import moe.rukamori.archivetune.constants.PlayVideoAsOfficialAudioKey
 import moe.rukamori.archivetune.constants.PlayerVolumeKey
 import moe.rukamori.archivetune.constants.RepeatModeKey
 import moe.rukamori.archivetune.constants.ScrobbleDelayPercentKey
@@ -245,9 +246,14 @@ import moe.rukamori.archivetune.lastfm.LastFM
 import moe.rukamori.archivetune.lyrics.LyricsHelper
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.modules.ModuleAudioSelection
+import moe.rukamori.archivetune.modules.ModuleDiagnostics
 import moe.rukamori.archivetune.modules.ModuleDownloadRepository
 import moe.rukamori.archivetune.modules.ModuleMediaStorage
+import moe.rukamori.archivetune.modules.ModuleRepository
 import moe.rukamori.archivetune.modules.ResolveModuleAudioUseCase
+import moe.rukamori.archivetune.modules.displayAuthor
+import moe.rukamori.archivetune.modules.displayLabel
+import moe.rukamori.archivetune.modules.moduleDiagnosticLabel
 import moe.rukamori.archivetune.modules.moduleMatchMetadata
 import moe.rukamori.archivetune.models.PersistPlayerState
 import moe.rukamori.archivetune.models.PersistQueue
@@ -283,6 +289,7 @@ import moe.rukamori.archivetune.sponsorblock.SponsorBlockPlaybackController
 import moe.rukamori.archivetune.storage.StorageFolderKind
 import moe.rukamori.archivetune.storage.StorageLocationRepository
 import moe.rukamori.archivetune.together.TogetherPlaybackSync
+import moe.rukamori.archivetune.together.isConnectedToSession
 import moe.rukamori.archivetune.ui.screens.settings.DiscordPresenceManager
 import moe.rukamori.archivetune.ui.screens.settings.ListenBrainzManager
 import moe.rukamori.archivetune.utils.CoilBitmapLoader
@@ -380,7 +387,31 @@ class MusicService :
     @Inject
     lateinit var moduleDownloadUtil: DownloadUtil
 
+    @Inject
+    lateinit var moduleRepository: ModuleRepository
+
+    @Inject
+    lateinit var moduleDiagnostics: ModuleDiagnostics
+
+    @Inject
+    lateinit var officialAudioResolver: OfficialAudioResolver
+
+    private var playVideoAsOfficialAudio = false
+    private var officialAudioSubstitutionJob: Job? = null
+    private var officialAudioSubstitutionPending = false
+    private val officialAudioSources =
+        object : LinkedHashMap<String, MediaItem>() {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaItem>?): Boolean =
+                size > MAX_OFFICIAL_AUDIO_SOURCES
+        }
+
     private val activeModuleAudio = ConcurrentHashMap<String, ModuleAudioSelection>()
+    private val moduleSourceOutcomes = ConcurrentHashMap<String, ResolvedModuleSourceOutcome>()
+
+    private data class ResolvedModuleSourceOutcome(
+        val outcome: ModuleSourceOutcome,
+        val consultedModules: List<ConsultedModule>,
+    )
 
     @Inject
     lateinit var observePlaybackPreloadConfiguration: ObservePlaybackPreloadConfigurationUseCase
@@ -450,8 +481,8 @@ class MusicService :
     private lateinit var connectivityManager: ConnectivityManager
     lateinit var connectivityObserver: NetworkConnectivityObserver
     val waitingForNetworkConnection = MutableStateFlow(false)
-    private val _unrecoveredPlaybackError = MutableStateFlow<PlaybackException?>(null)
-    val unrecoveredPlaybackError = _unrecoveredPlaybackError.asStateFlow()
+    private val _unrecoveredPlaybackFailure = MutableStateFlow<PlaybackFailure?>(null)
+    val unrecoveredPlaybackFailure = _unrecoveredPlaybackFailure.asStateFlow()
     private val isNetworkConnected = MutableStateFlow(false)
 
     private val audioQuality by enumPreference(
@@ -1308,6 +1339,13 @@ class MusicService :
                     removeMusicVideoItems()
                 }
             }
+        dataStore.data
+            .map { preferences -> preferences[PlayVideoAsOfficialAudioKey] ?: false }
+            .distinctUntilChanged()
+            .collect(scope) { enabled ->
+                playVideoAsOfficialAudio = enabled
+                requestOfficialAudioSubstitution()
+            }
         widgetUpdater =
             MusicServiceWidgetUpdater(
                 service = this,
@@ -1345,7 +1383,7 @@ class MusicService :
             carMediaButtonPreferences = ::buildAndroidAutoButtons
             adoptQueueContinuation = ::adoptQueueContinuation
         }
-        val mediaSessionBuilder = MediaLibrarySession.Builder(this, player, mediaLibrarySessionCallback)
+        val mediaSessionBuilder = MediaLibrarySession.Builder(this, MediaSessionNavigationPlayer(player), mediaLibrarySessionCallback)
             .setBitmapLoader(CoilBitmapLoader(this, scope))
         if (BuildConfig.DEVICE != "automotive") {
             mediaSessionBuilder.setSessionActivity(
@@ -2309,6 +2347,85 @@ class MusicService :
 
     private fun removeMusicVideoItems() {
         removeQueueItems { item -> item.metadata?.isMusicVideo == true }
+    }
+
+    private fun canSubstituteOfficialAudio(): Boolean =
+        playVideoAsOfficialAudio && !togetherSessionState.value.isConnectedToSession
+
+    private fun requestOfficialAudioSubstitution() {
+        if (!canSubstituteOfficialAudio()) return
+        officialAudioSubstitutionPending = true
+        if (officialAudioSubstitutionJob?.isActive == true) return
+        officialAudioSubstitutionJob =
+            scope.launch {
+                while (officialAudioSubstitutionPending) {
+                    officialAudioSubstitutionPending = false
+                    try {
+                        substituteUpcomingOfficialAudio()
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (failure: Exception) {
+                        Timber.tag("OfficialAudio").w(failure, "Failed to substitute official audio")
+                    }
+                }
+            }
+    }
+
+    private suspend fun substituteUpcomingOfficialAudio() {
+        val indices =
+            listOf(player.currentMediaItemIndex, player.nextMediaItemIndex)
+                .filter { it in 0 until player.mediaItemCount }
+                .distinct()
+        for (hintIndex in indices) {
+            if (!canSubstituteOfficialAudio() || hintIndex !in 0 until player.mediaItemCount) return
+            val video = player.getMediaItemAt(hintIndex)
+            val substitute = officialAudioFor(video) ?: continue
+            val index = findQueueItemIndex(video, hintIndex) ?: continue
+            if (index == player.currentMediaItemIndex &&
+                player.currentPosition > OFFICIAL_AUDIO_CURRENT_ITEM_SWAP_WINDOW_MS
+            ) {
+                continue
+            }
+            player.replaceMediaItem(index, substitute)
+        }
+    }
+
+    private suspend fun officialAudioFor(video: MediaItem): MediaItem? {
+        if (!canSubstituteOfficialAudio()) return null
+        val metadata = video.metadata?.takeIf { it.isMusicVideo && !it.isPodcast } ?: return null
+        val uri = video.localConfiguration?.uri
+        if (video.mediaId.isLocalMediaId() || uri == null || uri.shouldBypassYouTubeResolver()) return null
+        if (withContext(Dispatchers.IO) { downloadCache.isFullyCached(video.mediaId) }) return null
+        val song =
+            (officialAudioResolver.resolve(metadata) as? OfficialAudioResolver.Resolution.Available)?.song
+                ?: return null
+        if (!canSubstituteOfficialAudio()) return null
+        val entryId = video.queueEntryId ?: java.util.UUID.randomUUID().toString()
+        officialAudioSources[entryId] = video
+        return song.toMediaItem().withQueueEntry(recommended = video.isQueueRecommendation, id = entryId)
+    }
+
+    private fun findQueueItemIndex(
+        item: MediaItem,
+        hintIndex: Int,
+    ): Int? {
+        val entryId = item.queueEntryId
+        val matches = { candidate: MediaItem ->
+            if (entryId != null) candidate.queueEntryId == entryId else candidate === item
+        }
+        if (hintIndex in 0 until player.mediaItemCount && matches(player.getMediaItemAt(hintIndex))) return hintIndex
+        return (0 until player.mediaItemCount).firstOrNull { matches(player.getMediaItemAt(it)) }
+    }
+
+    private fun restoreOfficialAudioSource(): Boolean {
+        val current = player.currentMediaItem ?: return false
+        val video = current.queueEntryId?.let { entryId -> officialAudioSources.remove(entryId) } ?: return false
+        if (video.mediaId == current.mediaId) return false
+        officialAudioResolver.markUnavailable(video.mediaId)
+        Timber.tag("OfficialAudio").i("Falling back to %s after %s failed to play", video.mediaId, current.mediaId)
+        player.replaceMediaItem(player.currentMediaItemIndex, video)
+        player.prepare()
+        return true
     }
 
     private inline fun removeQueueItems(shouldRemove: (MediaItem) -> Boolean) {
@@ -3701,6 +3818,7 @@ class MusicService :
             .setDisplayName(displayName)
             .setCustomIconResId(iconResId)
             .setSessionCommand(command)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
             .setEnabled(enabled)
             .build()
 
@@ -4007,12 +4125,13 @@ class MusicService :
             val hideExplicit = dataStore.get(HideExplicitKey, false)
             val hideVideo = dataStore.get(HideVideoKey, false)
             val autoLoadMoreEnabled = dataStore.get(AutoLoadMoreKey, true)
-            val preloadItem =
+            val preloadVideo =
                 queue.preloadItem
                     ?.toMediaItem()?.withQueueEntry(recommended = false)
                     ?.takeUnless { item ->
                         item.hasBlockedArtist(loadBlockedArtistIds())
                     }
+            val preloadItem = preloadVideo?.let { video -> officialAudioFor(video) ?: video }
             if (preloadItem != null) {
                 player.setMediaItem(preloadItem)
                 player.prepare()
@@ -4072,17 +4191,20 @@ class MusicService :
                 return@launch
             }
             if (preloadItem != null) {
-                val preloadMediaId = preloadItem.mediaId.trim()
+                val preloadMediaIds =
+                    listOfNotNull(preloadItem.mediaId, preloadVideo?.mediaId)
+                        .map(String::trim)
+                        .filterTo(HashSet(), String::isNotEmpty)
                 val insertionIndex =
                     initialStatus.mediaItemIndex.coerceIn(0, initialStatus.items.size)
                 val itemsBeforeCurrent =
                     initialStatus.items
                         .subList(0, insertionIndex)
-                        .filterNot { preloadMediaId.isNotEmpty() && it.mediaId.trim() == preloadMediaId }
+                        .filterNot { it.mediaId.trim() in preloadMediaIds }
                 val itemsAfterCurrent =
                     initialStatus.items
                         .subList(insertionIndex, initialStatus.items.size)
-                        .filterNot { preloadMediaId.isNotEmpty() && it.mediaId.trim() == preloadMediaId }
+                        .filterNot { it.mediaId.trim() in preloadMediaIds }
 
                 player.addMediaItems(0, itemsBeforeCurrent)
                 player.addMediaItems(itemsAfterCurrent)
@@ -4090,8 +4212,11 @@ class MusicService :
                     applyCurrentFirstShuffleOrder()
                 }
             } else {
-                val items = initialStatus.items
                 val index = initialStatus.mediaItemIndex
+                val items =
+                    initialStatus.items.toMutableList().apply {
+                        getOrNull(index)?.let { video -> officialAudioFor(video) }?.let { substitute -> set(index, substitute) }
+                    }
 
                 player.setMediaItems(items, index, initialStatus.position)
                 player.prepare()
@@ -7185,6 +7310,15 @@ class MusicService :
         ) {
             updateNextStreamPreload()
         }
+        if (events.containsAny(
+                Player.EVENT_MEDIA_ITEM_TRANSITION,
+                Player.EVENT_TIMELINE_CHANGED,
+                Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
+                Player.EVENT_REPEAT_MODE_CHANGED,
+            )
+        ) {
+            requestOfficialAudioSubstitution()
+        }
         val currentMediaId = player.currentMediaItem?.mediaId
         if (currentMediaId == null && currentHistoryMediaId != null) {
             beginHistorySession(null, forceNew = true)
@@ -7505,8 +7639,8 @@ class MusicService :
 
     override fun onPlayerErrorChanged(error: PlaybackException?) {
         super.onPlayerErrorChanged(error)
-        if (_unrecoveredPlaybackError.value !== error) {
-            _unrecoveredPlaybackError.value = null
+        if (_unrecoveredPlaybackFailure.value?.error !== error) {
+            _unrecoveredPlaybackFailure.value = null
         }
     }
 
@@ -7524,12 +7658,91 @@ class MusicService :
     }
 
     private fun surfaceUnrecoveredPlaybackError(error: PlaybackException) {
-        if (player.playerError === error) {
-            _unrecoveredPlaybackError.value = error
+        if (player.playerError !== error) return
+        val item = player.currentMediaItem
+        val metadata = item?.metadata
+        _unrecoveredPlaybackFailure.value =
+            PlaybackFailure(
+                error = error,
+                source = item?.let { playbackFailureSource(it, error) },
+                trackTitle = metadata?.title?.takeIf(String::isNotBlank),
+                trackArtists =
+                    metadata?.artists
+                        ?.map { it.name }
+                        ?.filter(String::isNotBlank)
+                        ?.joinToString(", ")
+                        ?.takeIf(String::isNotBlank),
+            )
+    }
+
+    private fun playbackFailureSource(
+        item: MediaItem,
+        error: PlaybackException,
+    ): PlaybackFailureSource {
+        val uri = item.localConfiguration?.uri
+        val scheme = uri?.scheme?.lowercase(Locale.US)
+        if (item.mediaId.isLocalMediaId() || uri?.shouldBypassPlayerCache() == true) {
+            return PlaybackFailureSource.LocalFile
+        }
+        if (scheme == "http" || scheme == "https") {
+            return PlaybackFailureSource.DirectLink(uri?.host.orEmpty())
+        }
+        val preparationFailed = error.hasCause<ModuleSourcePreparationException>()
+        val resolved = moduleSourceOutcomes[item.mediaId]
+        return when (val outcome = resolved?.outcome) {
+            is ModuleSourceOutcome.Selected -> {
+                outcome.selection.toFailureSource(outcome.offline, preparationFailed)
+            }
+
+            is ModuleSourceOutcome.Failed -> {
+                outcome.selection?.toFailureSource(outcome.offline, preparationFailed = true)
+                    ?: PlaybackFailureSource.ModulePipeline
+            }
+
+            is ModuleSourceOutcome.Fallback -> {
+                PlaybackFailureSource.YouTubeMusic(resolved?.consultedModules.orEmpty())
+            }
+
+            ModuleSourceOutcome.Bypassed, null -> {
+                if (preparationFailed) {
+                    PlaybackFailureSource.ModulePipeline
+                } else {
+                    PlaybackFailureSource.YouTubeMusic(emptyList())
+                }
+            }
         }
     }
 
+    private fun ModuleAudioSelection.toFailureSource(
+        offline: Boolean,
+        preparationFailed: Boolean,
+    ): PlaybackFailureSource.Module =
+        PlaybackFailureSource.Module(
+            name = module.displayLabel,
+            version = module.manifest.version,
+            author = module.displayAuthor,
+            icon = module.manifest.icon,
+            upstream = moduleDiagnosticLabel(stream.upstreamProvider),
+            variant = moduleDiagnosticLabel(stream.variant),
+            mimeType = moduleDiagnosticLabel(stream.mimeType),
+            codecs = moduleDiagnosticLabel(stream.codecs),
+            bitrate = stream.bitrate,
+            sampleRate = stream.sampleRate,
+            offline = offline,
+            preparationFailed = preparationFailed,
+        )
+
+    private inline fun <reified T : Throwable> Throwable.hasCause(): Boolean {
+        var throwable: Throwable? = this
+        while (throwable != null) {
+            if (throwable is T) return true
+            throwable = throwable.cause
+        }
+        return false
+    }
+
     private suspend fun finishUnrecoveredPlaybackError(error: PlaybackException) {
+        if (restoreOfficialAudioSource()) return
         if (dataStore.get(AutoSkipNextOnErrorKey, false)) skipOnError() else stopOnError()
         surfaceUnrecoveredPlaybackError(error)
     }
@@ -8061,8 +8274,39 @@ class MusicService :
             completedDownload = { id ->
                 moduleDownloadUtil.downloadManager.downloadIndex.getDownload(id)?.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED
             },
-            selected = ::onModuleAudioSelected,
+            selected = ::onModuleSourceOutcome,
         )
+
+    private fun onModuleSourceOutcome(mediaId: String, outcome: ModuleSourceOutcome) {
+        val consulted =
+            if (outcome is ModuleSourceOutcome.Fallback) consultedModules(outcome.startedAtMs) else emptyList()
+        moduleSourceOutcomes[mediaId] = ResolvedModuleSourceOutcome(outcome, consulted)
+        if (moduleSourceOutcomes.size > 256) {
+            moduleSourceOutcomes.keys.filter { it != mediaId }.take(moduleSourceOutcomes.size - 256).forEach(moduleSourceOutcomes::remove)
+        }
+        when (outcome) {
+            is ModuleSourceOutcome.Selected -> onModuleAudioSelected(mediaId, outcome.selection)
+            is ModuleSourceOutcome.Fallback, ModuleSourceOutcome.Bypassed -> onModuleAudioSelected(mediaId, null)
+            is ModuleSourceOutcome.Failed -> Unit
+        }
+    }
+
+    private fun consultedModules(startedAtMs: Long): List<ConsultedModule> {
+        val registry = moduleRepository.state.value ?: return emptyList()
+        if (!registry.enabled) return emptyList()
+        val diagnostics = moduleDiagnostics.state.value
+        return registry.modules
+            .filter { it.enabled }
+            .map { module ->
+                ConsultedModule(
+                    name = module.displayLabel,
+                    status =
+                        diagnostics[module.id]
+                            ?.takeIf { it.atMs >= startedAtMs && it.revision == module.revision }
+                            ?.status,
+                )
+            }
+    }
 
     private fun onModuleAudioSelected(mediaId: String, selection: ModuleAudioSelection?) {
         if (selection == null) {
@@ -8904,6 +9148,8 @@ class MusicService :
         private const val AUDIO_EFFECT_INITIALIZATION_RETRY_DELAY_MS = 250L
         private const val DISCORD_SYNC_TAG = "DiscordSync"
         private const val DISCORD_HOLD_TIMEOUT_MS = 7_000L
+        private const val MAX_OFFICIAL_AUDIO_SOURCES = 256
+        private const val OFFICIAL_AUDIO_CURRENT_ITEM_SWAP_WINDOW_MS = 5_000L
         const val CHANNEL_ID = "music_channel_01"
         const val ACTION_MEDIA_NOTIFICATION_DISMISSED =
             "moe.rukamori.archivetune.action.MEDIA_NOTIFICATION_DISMISSED"
