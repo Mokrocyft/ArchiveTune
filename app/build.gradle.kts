@@ -67,8 +67,8 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 143
-        versionName = "16.0.0"
+        versionCode = 144
+        versionName = "16.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -386,7 +386,6 @@ dependencies {
     implementation(project(":lyrics:lrcred"))
     implementation(project(":lyrics:binimum"))
     implementation(project(":lyrics:megalobiz"))
-    implementation(project(":lyrics:musixmatch"))
     implementation(project(":lastfm"))
     implementation(project(":canvas"))
     implementation(project(":shazamkit"))
